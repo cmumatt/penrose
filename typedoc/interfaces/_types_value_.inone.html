@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta http-equiv="X-UA-Compatible" content="IE=edge">
-	<title>ShapeProps | @penrose/core</title>
+	<title>INONE | @penrose/core</title>
 	<meta name="description" content="Documentation for @penrose/core">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<link rel="stylesheet" href="../assets/css/main.css">
@@ -56,24 +56,32 @@
 					<a href="../globals.html">Globals</a>
 				</li>
 				<li>
-					<a href="../modules/_renderer_renderer_.html">&quot;renderer/Renderer&quot;</a>
+					<a href="../modules/_types_value_.html">&quot;types/value&quot;</a>
 				</li>
 				<li>
-					<a href="_renderer_renderer_.shapeprops.html">ShapeProps</a>
+					<a href="_types_value_.inone.html">INONE</a>
 				</li>
 			</ul>
-			<h1>Interface ShapeProps</h1>
+			<h1>Interface INONE&lt;T&gt;</h1>
 		</div>
 	</div>
 </header>
 <div class="container container-main">
 	<div class="row">
 		<div class="col-8 col-content">
+			<section class="tsd-panel tsd-type-parameters">
+				<h3>Type parameters</h3>
+				<ul class="tsd-type-parameters">
+					<li>
+						<h4>T</h4>
+					</li>
+				</ul>
+			</section>
 			<section class="tsd-panel tsd-hierarchy">
 				<h3>Hierarchy</h3>
 				<ul class="tsd-hierarchy">
 					<li>
-						<span class="target">ShapeProps</span>
+						<span class="target">INONE</span>
 					</li>
 				</ul>
 			</section>
@@ -84,9 +92,8 @@
 						<section class="tsd-index-section ">
 							<h3>Properties</h3>
 							<ul class="tsd-index-list">
-								<li class="tsd-kind-property tsd-parent-kind-interface"><a href="_renderer_renderer_.shapeprops.html#canvassize" class="tsd-kind-icon">canvas<wbr>Size</a></li>
-								<li class="tsd-kind-property tsd-parent-kind-interface"><a href="_renderer_renderer_.shapeprops.html#labels" class="tsd-kind-icon">labels</a></li>
-								<li class="tsd-kind-property tsd-parent-kind-interface"><a href="_renderer_renderer_.shapeprops.html#shape" class="tsd-kind-icon">shape</a></li>
+								<li class="tsd-kind-property tsd-parent-kind-interface"><a href="_types_value_.inone.html#contents" class="tsd-kind-icon">contents</a></li>
+								<li class="tsd-kind-property tsd-parent-kind-interface"><a href="_types_value_.inone.html#tag" class="tsd-kind-icon">tag</a></li>
 							</ul>
 						</section>
 					</div>
@@ -95,32 +102,22 @@
 			<section class="tsd-panel-group tsd-member-group ">
 				<h2>Properties</h2>
 				<section class="tsd-panel tsd-member tsd-kind-property tsd-parent-kind-interface">
-					<a name="canvassize" class="tsd-anchor"></a>
-					<h3>canvas<wbr>Size</h3>
-					<div class="tsd-signature tsd-kind-icon">canvas<wbr>Size<span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">[</span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">, </span><span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">]</span></div>
+					<a name="contents" class="tsd-anchor"></a>
+					<h3>contents</h3>
+					<div class="tsd-signature tsd-kind-icon">contents<span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">T</span><span class="tsd-signature-symbol">[]</span></div>
 					<aside class="tsd-sources">
 						<ul>
-							<li>Defined in <a href="https://github.com/cmumatt/penrose/blob/ef6558f/packages/core/src/renderer/Renderer.ts#L11">packages/core/src/renderer/Renderer.ts:11</a></li>
+							<li>Defined in <a href="https://github.com/cmumatt/penrose/blob/ef6558f/packages/core/src/types/value.ts#L240">packages/core/src/types/value.ts:240</a></li>
 						</ul>
 					</aside>
 				</section>
 				<section class="tsd-panel tsd-member tsd-kind-property tsd-parent-kind-interface">
-					<a name="labels" class="tsd-anchor"></a>
-					<h3>labels</h3>
-					<div class="tsd-signature tsd-kind-icon">labels<span class="tsd-signature-symbol">:</span> <a href="../modules/_types_state_.html#labelcache" class="tsd-signature-type">LabelCache</a></div>
+					<a name="tag" class="tsd-anchor"></a>
+					<h3>tag</h3>
+					<div class="tsd-signature tsd-kind-icon">tag<span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">"NONE"</span></div>
 					<aside class="tsd-sources">
 						<ul>
-							<li>Defined in <a href="https://github.com/cmumatt/penrose/blob/ef6558f/packages/core/src/renderer/Renderer.ts#L10">packages/core/src/renderer/Renderer.ts:10</a></li>
-						</ul>
-					</aside>
-				</section>
-				<section class="tsd-panel tsd-member tsd-kind-property tsd-parent-kind-interface">
-					<a name="shape" class="tsd-anchor"></a>
-					<h3>shape</h3>
-					<div class="tsd-signature tsd-kind-icon">shape<span class="tsd-signature-symbol">:</span> <a href="../modules/_types_shape_.html#shape" class="tsd-signature-type">Shape</a></div>
-					<aside class="tsd-sources">
-						<ul>
-							<li>Defined in <a href="https://github.com/cmumatt/penrose/blob/ef6558f/packages/core/src/renderer/Renderer.ts#L9">packages/core/src/renderer/Renderer.ts:9</a></li>
+							<li>Defined in <a href="https://github.com/cmumatt/penrose/blob/ef6558f/packages/core/src/types/value.ts#L239">packages/core/src/types/value.ts:239</a></li>
 						</ul>
 					</aside>
 				</section>
@@ -133,7 +130,7 @@
 						<a href="../globals.html"><em>Globals</em></a>
 					</li>
 					<li class="current tsd-kind-module">
-						<a href="../modules/_renderer_renderer_.html">&quot;renderer/<wbr>Renderer&quot;</a>
+						<a href="../modules/_types_value_.html">&quot;types/value&quot;</a>
 					</li>
 				</ul>
 			</nav>
@@ -141,37 +138,19 @@
 				<ul class="before-current">
 				</ul>
 				<ul class="current">
-					<li class="current tsd-kind-interface tsd-parent-kind-module">
-						<a href="_renderer_renderer_.shapeprops.html" class="tsd-kind-icon">Shape<wbr>Props</a>
+					<li class="current tsd-kind-interface tsd-parent-kind-module tsd-has-type-parameter">
+						<a href="_types_value_.inone.html" class="tsd-kind-icon">INONE</a>
 						<ul>
 							<li class=" tsd-kind-property tsd-parent-kind-interface">
-								<a href="_renderer_renderer_.shapeprops.html#canvassize" class="tsd-kind-icon">canvas<wbr>Size</a>
+								<a href="_types_value_.inone.html#contents" class="tsd-kind-icon">contents</a>
 							</li>
 							<li class=" tsd-kind-property tsd-parent-kind-interface">
-								<a href="_renderer_renderer_.shapeprops.html#labels" class="tsd-kind-icon">labels</a>
-							</li>
-							<li class=" tsd-kind-property tsd-parent-kind-interface">
-								<a href="_renderer_renderer_.shapeprops.html#shape" class="tsd-kind-icon">shape</a>
+								<a href="_types_value_.inone.html#tag" class="tsd-kind-icon">tag</a>
 							</li>
 						</ul>
 					</li>
 				</ul>
 				<ul class="after-current">
-					<li class=" tsd-kind-function tsd-parent-kind-module">
-						<a href="../modules/_renderer_renderer_.html#draggableshape" class="tsd-kind-icon">Draggable<wbr>Shape</a>
-					</li>
-					<li class=" tsd-kind-function tsd-parent-kind-module">
-						<a href="../modules/_renderer_renderer_.html#renderinteractive" class="tsd-kind-icon">Render<wbr>Interactive</a>
-					</li>
-					<li class=" tsd-kind-function tsd-parent-kind-module">
-						<a href="../modules/_renderer_renderer_.html#rendershape" class="tsd-kind-icon">Render<wbr>Shape</a>
-					</li>
-					<li class=" tsd-kind-function tsd-parent-kind-module">
-						<a href="../modules/_renderer_renderer_.html#renderstatic" class="tsd-kind-icon">Render<wbr>Static</a>
-					</li>
-					<li class=" tsd-kind-function tsd-parent-kind-module tsd-is-not-exported">
-						<a href="../modules/_renderer_renderer_.html#getposition" class="tsd-kind-icon">get<wbr>Position</a>
-					</li>
 				</ul>
 			</nav>
 		</div>
