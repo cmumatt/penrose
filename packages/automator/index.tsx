@@ -22,9 +22,9 @@ const USAGE = `
 Penrose Automator.
 
 Usage:
-  automator batch LIB OUTFOLDER [--folders]  [--src-prefix=PREFIX] [--repeat=TIMES] [--render=OUTFOLDER] [--staged] [--cross-energy]
+  automator batch LIB OUTFOLDER [--folders] [--src-prefix=PREFIX] [--repeat=TIMES] [--render=OUTFOLDER] [--staged] [--cross-energy]
   automator render ARTIFACTSFOLDER OUTFOLDER
-  automator draw SUBSTANCE STYLE DOMAIN OUTFOLDER [--src-prefix=PREFIX] [--staged]
+  automator draw SUBSTANCE STYLE DOMAIN OUTFOLDER [--src-prefix=PREFIX] [--staged] [--variation=VARIATION] [--folders] [--cross-energy]
 
 Options:
   -o, --outFile PATH Path to either an SVG file or a folder, depending on the value of --folders. [default: output.svg]
@@ -32,7 +32,8 @@ Options:
   --src-prefix PREFIX the prefix to SUBSTANCE, STYLE, and DOMAIN, or the library equivalent in batch mode. No trailing "/" required. [default: .]
   --repeat TIMES the number of instances 
   --staged Generate staged SVGs of the final diagram
-  --cross-energy compute the cross-instance energy
+  --cross-energy Compute the cross-instance energy
+  --variation The variation to use
 `;
 
 const nonZeroConstraints = (
@@ -56,8 +57,8 @@ const toMs = (hr: any) => hr[1] / 1000000;
 // In an async context, communicate with the backend to compile and optimize the diagram
 const singleProcess = async (
   variation: string,
-  sub: any,
-  sty: any,
+  sub: string,
+  sty: string,
   dsl: string,
   folders: boolean,
   out: string,
@@ -74,6 +75,18 @@ const singleProcess = async (
   extrameta?,
   ciee?
 ) => {
+  // Check: Input trio exists
+  let fileNotFound : boolean = false;
+  [sub, sty, dsl].map((arg) => {
+    if(!fs.existsSync(join(prefix,arg))) {
+      console.log(chalk.red(`Input file not found: ${join(prefix,arg)}`));
+      fileNotFound = true;
+    }
+  });
+  if(fileNotFound) {
+    throw new Error(`At least one input file not found`);
+  }
+  
   // Fetch Substance, Style, and Domain files
   const [subIn, styIn, dslIn] = [sub, sty, dsl].map((arg) =>
     fs.readFileSync(join(prefix, arg), "utf8").toString()
@@ -256,6 +269,11 @@ const batchProcess = async (
   prefix: string,
   staged: boolean
 ) => {
+  // Check: Registry file exists
+  if(!fs.existsSync(join(prefix,lib))) {
+    console.log(chalk.red(`Registry file not found: ${join(prefix,lib)}`));
+    throw new Error(`Registry file not found: ${join(prefix,lib)}`);
+  }
   const registry = JSON.parse(fs.readFileSync(join(prefix, lib)).toString());
   const substanceLibrary = registry["substances"];
   const styleLibrary = registry["styles"];
@@ -346,6 +364,7 @@ const batchProcess = async (
   const outFile = args["--outFile"] || join(args.OUTFOLDER, "output.svg");
   const times = args["--repeat"] || 1;
   const prefix = args["--src-prefix"];
+  const variation = args["--variation"] || "";
 
   const staged = args["--staged"] || false;
 
@@ -360,13 +379,23 @@ const batchProcess = async (
     renderArtifacts(args.ARTIFACTSFOLDER, args.OUTFOLDER);
   } else if (args.draw) {
     await singleProcess(
+      variation,
       args.SUBSTANCE,
       args.STYLE,
       args.DOMAIN,
       folders,
-      outFile,
+      (folders ? args.OUTFOLDER : outFile),
       prefix,
       staged,
+      {
+        substanceName: args.SUBSTANCE,
+        styleName: args.STYLE,
+        domainName: args.DOMAIN,
+        id: uniqid("instance-"),
+      },
+      undefined, // reference
+      undefined, // referenceState
+      undefined, // extraMetadata
       ciee
     );
   } else {
