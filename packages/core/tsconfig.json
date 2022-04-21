@@ -56,20 +56,19 @@
     "dist",
     "src/__tests__",
     "src/__testfixtures__",
+    "src/__benchmarks__",
     "scripts",
     "acceptance-tests",
     "webpack"
   ],
   "typedocOptions": {
-    "inputFiles": ["./src"],
-    "mode": "modules",
-    "out": "doc",
+    "entryPoints": ["./src"],
+    "out": "docs/html",
     "exclude": [
       "**/*.test.ts",
       "**/*.test.tsx",
       "**/*__*/**",
       "**/node_modules/**"
-    ],
-    "includeDeclarations": true
+    ]
   }
 }

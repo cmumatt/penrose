@@ -1,11 +1,9 @@
 import {
+  attrAutoFillSvg,
   attrCenter,
   attrFill,
-  attrRadiusX,
-  attrRadiusY,
   attrStroke,
   attrTitle,
-  attrAutoFillSvg,
 } from "./AttrHelper";
 import { ShapeProps } from "./Renderer";
 
@@ -23,8 +21,6 @@ const Ellipse = ({ shape, canvasSize }: ShapeProps): SVGEllipseElement => {
   attrToNotAutoMap.push(...attrCenter(shape, canvasSize, elem));
   attrToNotAutoMap.push(...attrStroke(shape, elem));
   attrToNotAutoMap.push(...attrTitle(shape, elem));
-  attrToNotAutoMap.push(...attrRadiusX(shape, elem));
-  attrToNotAutoMap.push(...attrRadiusY(shape, elem));
 
   // Directrly Map across any "unknown" SVG properties
   attrAutoFillSvg(shape, elem, attrToNotAutoMap);

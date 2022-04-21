@@ -1,6 +1,6 @@
-import { languages, IRange } from "monaco-editor";
+import { compDict, constrDict, objDict } from "@penrose/core";
+import { IRange, languages } from "monaco-editor";
 import { CommentCommon, CommonTokens } from "./common";
-import { objDict, constrDict, compDict } from "@penrose/core";
 
 export const StyleConfig: languages.LanguageConfiguration = {
   comments: {
@@ -48,6 +48,9 @@ const styleCustoms = {
     "override",
     "above",
     "below",
+    "has",
+    "math",
+    "text",
   ],
   types: [
     "scalar",

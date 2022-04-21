@@ -1,13 +1,14 @@
+import { examples } from "@penrose/examples";
 import * as fs from "fs";
 import * as nearley from "nearley";
 import grammar from "parser/SubstanceParser";
 import * as path from "path";
+import { Env } from "types/domain";
 import { PenroseError } from "types/errors";
+import { SubstanceEnv } from "types/substance";
 import { Result, showError, showType } from "utils/Error";
 import { compileDomain } from "./Domain";
 import { compileSubstance, prettySubstance } from "./Substance";
-import { SubstanceEnv } from "types/substance";
-import { Env } from "types/domain";
 
 const printError = false;
 const saveContexts = false;
@@ -140,21 +141,25 @@ describe("Postprocess", () => {
 Set A, B, C, D, E
 AutoLabel All
 Label A $\\vec{A}$
-Label B $B_1$
+Label B "B_1"
 NoLabel D, E
     `;
     const env = envOrError(domainProg);
     const res = compileSubstance(prog, env);
     if (res.isOk()) {
       const expected = [
-        ["A", "\\vec{A}"],
-        ["B", "B_1"],
-        ["C", "C"],
-        ["D", ""],
-        ["E", ""],
+        ["A", "\\vec{A}", "MathLabel"],
+        ["B", "B_1", "TextLabel"],
+        ["C", "C", "MathLabel"],
+        ["D", "", "NoLabel"],
+        ["E", "", "NoLabel"],
       ];
       const labelMap = res.value[0].labels;
-      expected.map(([id, value]) => expect(labelMap.get(id)!).toEqual(value));
+      expected.map(([id, value, type]) => {
+        const label = labelMap.get(id)!;
+        expect(label.value).toEqual(value);
+        expect(label.type).toEqual(type);
+      });
     } else {
       fail("Unexpected error when processing labels: " + showError(res.error));
     }
@@ -498,10 +503,11 @@ describe("Real Programs", () => {
   }
 
   subPaths.map(([domainPath, examplePath]) => {
-    const domFile = path.join("../../examples/", domainPath);
-    const subFile = path.join("../../examples/", examplePath);
-    const domProg = fs.readFileSync(domFile, "utf8");
-    const subProg = fs.readFileSync(subFile, "utf8");
+    // a bit hacky, only works with 2-part paths
+    const [domPart0, domPart1] = domainPath.split("/");
+    const [subPart0, subPart1] = examplePath.split("/");
+    const domProg = examples[domPart0][domPart1];
+    const subProg = examples[subPart0][subPart1];
     test(examplePath, () => {
       // do testing
       const env = envOrError(domProg);
