@@ -9,7 +9,8 @@ import {
   showError,
   stepUntilConvergence,
 } from "@penrose/core";
-import { join, parse, resolve } from "path";
+import { randomBytes } from "crypto";
+import { dirname, join, parse, resolve } from "path";
 import { renderArtifacts } from "./artifacts";
 
 const fs = require("fs");
@@ -75,18 +76,6 @@ const singleProcess = async (
   extrameta?,
   ciee?
 ) => {
-  // Check: Input trio exists
-  let fileNotFound : boolean = false;
-  [sub, sty, dsl].map((arg) => {
-    if(!fs.existsSync(join(prefix,arg))) {
-      console.log(chalk.red(`Input file not found: ${join(prefix,arg)}`));
-      fileNotFound = true;
-    }
-  });
-  if(fileNotFound) {
-    throw new Error(`At least one input file not found`);
-  }
-  
   // Fetch Substance, Style, and Domain files
   const [subIn, styIn, dslIn] = [sub, sty, dsl].map((arg) =>
     fs.readFileSync(join(prefix, arg), "utf8").toString()
@@ -241,6 +230,10 @@ const singleProcess = async (
     // returning metadata for aggregation
     return { metadata, state: optimizedState };
   } else {
+    const parentFolder = dirname(out);
+    if (!fs.existsSync(parentFolder)) {
+      fs.mkdirSync(parentFolder, { recursive: true });
+    }
     if (staged) {
       // write multiple svg files out
       const writeFileOut = (canvasData: any, index: number) => {
@@ -269,11 +262,6 @@ const batchProcess = async (
   prefix: string,
   staged: boolean
 ) => {
-  // Check: Registry file exists
-  if(!fs.existsSync(join(prefix,lib))) {
-    console.log(chalk.red(`Registry file not found: ${join(prefix,lib)}`));
-    throw new Error(`Registry file not found: ${join(prefix,lib)}`);
-  }
   const registry = JSON.parse(fs.readFileSync(join(prefix, lib)).toString());
   const substanceLibrary = registry["substances"];
   const styleLibrary = registry["styles"];
@@ -364,9 +352,8 @@ const batchProcess = async (
   const outFile = args["--outFile"] || join(args.OUTFOLDER, "output.svg");
   const times = args["--repeat"] || 1;
   const prefix = args["--src-prefix"];
-  const variation = args["--variation"] || "";
-
   const staged = args["--staged"] || false;
+  const variation = args["--variation"] || randomBytes(20).toString("hex");
 
   if (args.batch) {
     for (let i = 0; i < times; i++) {
@@ -384,7 +371,7 @@ const batchProcess = async (
       args.STYLE,
       args.DOMAIN,
       folders,
-      (folders ? args.OUTFOLDER : outFile),
+      folders ? args.OUTFOLDER : outFile,
       prefix,
       staged,
       {
