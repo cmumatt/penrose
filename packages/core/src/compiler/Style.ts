@@ -49,7 +49,15 @@ import {
   StyleWarnings,
   SubstanceError,
 } from "types/errors";
-import { Fn, OptType, Params, State } from "types/state";
+import {
+  Fn,
+  OptType,
+  Params,
+  ShapeSourceMap,
+  SourceEntityType,
+  SourceProgramType,
+  State,
+} from "types/state";
 import {
   BindingForm,
   Block,
@@ -3000,7 +3008,8 @@ const isVaryingInitPath = <T>(
 // COMBAK: Add optConfig as param?
 const genState = (
   variation: string,
-  trans: Translation
+  trans: Translation,
+  shapeSourceMap: ShapeSourceMap
 ): Result<State, StyleErrors> => {
   const { rng, seeds } = variationSeeds(variation);
 
@@ -3067,6 +3076,7 @@ const genState = (
     seeds,
 
     shapes: initialGPIs, // These start out empty because they are initialized in the frontend via `evalShapes` in the Evaluator
+    shapeSourceMap: shapeSourceMap, // map of shapes to source lines
     shapePaths,
     shapeProperties,
     shapeOrdering,
@@ -3385,6 +3395,14 @@ export const compileStyle = (
     styVals
   );
 
+  // Map objects to its original program statements,
+  const shapeSourceMap: ShapeSourceMap = mapShapesToSource(
+    varEnv,
+    subEnv,
+    subProg,
+    styProg
+  );
+
   log.info("translation (before genOptProblem)", translateRes);
 
   // Translation failed somewhere
@@ -3401,7 +3419,11 @@ export const compileStyle = (
   }
 
   // TODO(errors): `findExprsSafe` shouldn't fail (as used in `genOptProblemAndState`, since all the paths are generated from the translation) but could always be safer...
-  const initState: Result<State, StyleErrors> = genState(variation, trans);
+  const initState: Result<State, StyleErrors> = genState(
+    variation,
+    trans,
+    shapeSourceMap
+  );
   log.info("init state from GenOptProblem", initState);
 
   if (initState.isErr()) {
@@ -3409,4 +3431,203 @@ export const compileStyle = (
   }
 
   return ok(initState.value);
+};
+
+/**
+ * Map shapes to their original source code
+ *
+ * @param varEnv
+ * @param subEnv
+ * @param subProg
+ * @param styProg
+ * @returns ShapeSourceMap
+ */
+const mapShapesToSource = (
+  varEnv: Env,
+  subEnv: SubstanceEnv,
+  subProg: SubProg<unknown>,
+  styProg: StyProg<unknown>
+): ShapeSourceMap => {
+  const sourceMap: ShapeSourceMap = new ShapeSourceMap();
+
+  // ------------------------------------------------------------------------
+  // Style: resolve GPIs to rules and Substance objects
+  // ------------------------------------------------------------------------
+
+  // ------------------------------------------------------------------------
+  // Substance: resolve Substance objects to types and predicates
+  //            TODO: Should probably be done in Substance compiler
+  // ------------------------------------------------------------------------
+  subProg.statements.forEach((stmt) => {
+    switch (stmt.tag) {
+      case "AutoLabel": {
+        break;
+      }
+
+      case "Decl": {
+        sourceMap.add({
+          entity: { type: SourceEntityType.SUBOBJECT, name: stmt.name.value },
+          ...mapTemplate(SourceProgramType.SUBSTANCE, stmt),
+        });
+        break;
+      }
+
+      case "ApplyPredicate": {
+        // Add the predicate to the map
+        sourceMap.add({
+          entity: {
+            type: SourceEntityType.SUBPREDICATE,
+            name: stmt.name.value,
+          },
+          ...mapTemplate(SourceProgramType.SUBSTANCE, stmt),
+        });
+
+        // Add args to our queue for processing
+        const argQueue = stmt.args;
+        while (argQueue.length > 0) {
+          // Pop item off the queue and add any entities it references
+          const arg = argQueue.pop() as SubPredArg<unknown>;
+          if ("args" in arg && arg.args.length > 0) {
+            argQueue.push(...arg.args);
+          }
+
+          if (arg.tag == "Func") {
+            // Add the function to the map
+            sourceMap.add({
+              entity: {
+                type: SourceEntityType.SUBFUNCTION,
+                name: arg.name.value,
+              },
+              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
+            });
+          } else if (arg.tag == "ApplyPredicate") {
+            // Add the predicate to the map
+            sourceMap.add({
+              entity: {
+                type: SourceEntityType.SUBPREDICATE,
+                name: arg.name.value,
+              },
+              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
+            });
+          } else if (arg.tag == "Identifier") {
+            // Add the identifier to the map
+            sourceMap.add({
+              entity: { type: SourceEntityType.SUBOBJECT, name: arg.value },
+              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
+            });
+          } else {
+            console.log(JSON.stringify(arg));
+            console.log(
+              `Unhandled arg type in Substance program: ${arg.tag} at line ${arg["start"].line})`
+            );
+            throw new Error("Unhandled arg type");
+          }
+        }
+        break;
+      }
+
+      default: {
+        console.log(
+          `Unhandled node type in Substance program: ${stmt.tag} at line ${stmt["start"].line})`
+        );
+        throw new Error("Unhandled substance node type type");
+      }
+    }
+  });
+
+  // ------------------------------------------------------------------------
+  // Domain: Resolve predicates, functions, etc. to source locations
+  //         TODO: Should probably be done in Domain compiler
+  // ------------------------------------------------------------------------
+  if ("ast" in varEnv) {
+    const ast = varEnv.ast;
+    if (ast !== undefined) {
+      ast.statements.forEach((stmt) => {
+        switch (stmt.tag) {
+          case "TypeDecl": {
+            sourceMap.add({
+              entity: { type: SourceEntityType.DOMTYPE, name: stmt.name.value },
+              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
+            });
+            break;
+          }
+
+          case "FunctionDecl": {
+            sourceMap.add({
+              entity: {
+                type: SourceEntityType.DOMFUNCTION,
+                name: stmt.name.value,
+              },
+              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
+            });
+            break;
+          }
+
+          case "ConstructorDecl": {
+            sourceMap.add({
+              entity: {
+                type: SourceEntityType.DOMCONSTRUCTOR,
+                name: stmt.name.value,
+              },
+              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
+            });
+            break;
+          }
+
+          case "PredicateDecl": {
+            sourceMap.add({
+              entity: {
+                type: SourceEntityType.DOMPREDICATE,
+                name: stmt.name.value,
+              },
+              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
+            });
+            break;
+          }
+
+          case "SubTypeDecl": {
+            // Not yet supported
+            break;
+          }
+
+          case "PreludeDecl": {
+            // Not yet supported
+            break;
+          }
+
+          case "NotationDecl": {
+            // Not yet supported
+            break;
+          }
+        }
+      });
+    }
+  }
+
+  return sourceMap;
+};
+
+const mapTemplate = (
+  mode: SourceProgramType,
+  stmt: any
+): {
+  type: SourceProgramType;
+  lineStart: number;
+  lineEnd: number;
+  colStart: number;
+  colEnd: number;
+} => {
+  if (!("start" in stmt)) {
+    stmt["start"] = { line: 0, col: 0 };
+  }
+  if (!("end" in stmt)) {
+    stmt["end"] = { line: 0, col: 0 };
+  }
+  return {
+    type: mode,
+    lineStart: stmt.start.line,
+    lineEnd: stmt.end.line,
+    colStart: stmt.start.col,
+    colEnd: stmt.end.col,
+  };
 };

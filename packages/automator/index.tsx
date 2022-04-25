@@ -12,6 +12,7 @@ import {
 import { randomBytes } from "crypto";
 import { dirname, join, parse, resolve } from "path";
 import { renderArtifacts } from "./artifacts";
+import { State } from "@penrose/core";
 
 const fs = require("fs");
 const chalk = require("chalk");
@@ -23,9 +24,9 @@ const USAGE = `
 Penrose Automator.
 
 Usage:
-  automator batch LIB OUTFOLDER [--folders] [--src-prefix=PREFIX] [--repeat=TIMES] [--render=OUTFOLDER] [--staged] [--cross-energy]
+  automator batch LIB OUTFOLDER [--folders] [--src-prefix=PREFIX] [--repeat=TIMES] [--render=OUTFOLDER] [--staged] [--cross-energy] [--state-o-rama]
   automator render ARTIFACTSFOLDER OUTFOLDER
-  automator draw SUBSTANCE STYLE DOMAIN OUTFOLDER [--src-prefix=PREFIX] [--staged] [--variation=VARIATION] [--folders] [--cross-energy]
+  automator draw SUBSTANCE STYLE DOMAIN OUTFOLDER [--src-prefix=PREFIX] [--staged] [--variation=VARIATION] [--folders] [--cross-energy] [--state-o-rama]
 
 Options:
   -o, --outFile PATH Path to either an SVG file or a folder, depending on the value of --folders. [default: output.svg]
@@ -35,6 +36,7 @@ Options:
   --staged Generate staged SVGs of the final diagram
   --cross-energy Compute the cross-instance energy
   --variation The variation to use
+  --state-o-rama Output the state of the diagram as a JSON file (note: requires folders mode)
 `;
 
 const nonZeroConstraints = (
@@ -74,7 +76,8 @@ const singleProcess = async (
   reference?,
   referenceState?,
   extrameta?,
-  ciee?
+  ciee?,
+  states?
 ) => {
   // Fetch Substance, Style, and Domain files
   const [subIn, styIn, dslIn] = [sub, sty, dsl].map((arg) =>
@@ -92,7 +95,7 @@ const singleProcess = async (
     variation,
   });
   const compileEnd = process.hrtime(compileStart);
-  let compiledState;
+  let compiledState : State;
   if (compilerOutput.isOk()) {
     compiledState = compilerOutput.value;
   } else {
@@ -102,14 +105,14 @@ const singleProcess = async (
 
   const labelStart = process.hrtime();
   // resample because initial sampling did not use the special sampling seed
-  const initialState = resample(await prepareState(compiledState));
+  const initialState : State = resample(await prepareState(compiledState));
   const labelEnd = process.hrtime(labelStart);
 
   console.log(`Stepping for ${out} ...`);
 
   const convergeStart = process.hrtime();
   // TODO: report runtime errors
-  const optimizedState = stepUntilConvergence(
+  const optimizedState : State = stepUntilConvergence(
     initialState,
     10000
   ).unsafelyUnwrap();
@@ -224,6 +227,13 @@ const singleProcess = async (
     fs.writeFileSync(join(out, "style.sty"), styIn);
     fs.writeFileSync(join(out, "domain.dsl"), dslIn);
     fs.writeFileSync(join(out, "meta.json"), JSON.stringify(metadata));
+    if(states) {
+      fs.writeFileSync(join(out, "states.json"),JSON.stringify({
+        initial: {shapes: initialState.shapes, sourceMap: initialState.shapeSourceMap.getRefs()},
+        compiled: {shapes: compiledState.shapes, sourceMap: compiledState.shapeSourceMap.getRefs()},
+        optimized: {shapes: optimizedState.shapes, sourceMap: optimizedState.shapeSourceMap.getRefs()},
+      }));
+    }
     console.log(
       chalk.green(`The diagram and metadata has been saved to ${out}`)
     );
@@ -260,7 +270,9 @@ const batchProcess = async (
   folders: boolean,
   out: string,
   prefix: string,
-  staged: boolean
+  staged: boolean,
+  ciee: boolean,
+  states: boolean
 ) => {
   const registry = JSON.parse(fs.readFileSync(join(prefix, lib)).toString());
   const substanceLibrary = registry["substances"];
@@ -312,7 +324,9 @@ const batchProcess = async (
         },
         reference,
         referenceState,
-        meta
+        meta,
+        ciee,
+        states
       );
       if (folders) {
         const { metadata, state } = res;
@@ -354,10 +368,11 @@ const batchProcess = async (
   const prefix = args["--src-prefix"];
   const staged = args["--staged"] || false;
   const variation = args["--variation"] || randomBytes(20).toString("hex");
+  const states = args["--state-o-rama"] || false;
 
   if (args.batch) {
     for (let i = 0; i < times; i++) {
-      await batchProcess(args.LIB, folders, args.OUTFOLDER, prefix, staged);
+      await batchProcess(args.LIB, folders, args.OUTFOLDER, prefix, staged, ciee, states);
     }
     if (browserFolder) {
       renderArtifacts(args.OUTFOLDER, browserFolder);
@@ -383,7 +398,8 @@ const batchProcess = async (
       undefined, // reference
       undefined, // referenceState
       undefined, // extraMetadata
-      ciee
+      ciee, // cross-energy
+      states // state-o-rama
     );
   } else {
     throw new Error("Invalid command line argument");

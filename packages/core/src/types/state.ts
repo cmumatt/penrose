@@ -28,6 +28,7 @@ export interface IState {
   shapeOrdering: string[];
   labelCache: LabelCache;
   shapes: Shape[];
+  shapeSourceMap: ShapeSourceMap; // Map shapes to original source code
   varyingMap: VaryMap;
   canvas: Canvas;
 }
@@ -182,4 +183,68 @@ export interface IWeightInfo {
   epWeightNode: VarAD; // Changes (input in optimization, but we do NOT need the gradient WRT it)
   constrWeight: number;
   epWeight: number;
+}
+
+// Mapping from shape to corresponding source file locations
+// TODO: Move this to its own type file?
+//       Make sure we're returning values not refs
+export enum SourceProgramType {
+  DOMAIN,
+  SUBSTANCE,
+  STYLE,
+}
+export enum SourceEntityType {
+  DOMTYPE,
+  DOMCONSTRUCTOR,
+  DOMFUNCTION,
+  DOMSUBTYPE,
+  DOMPREDICATE,
+  SUBOBJECT,
+  SUBPREDICATE,
+  SUBCONSTRUCTOR,
+  SUBFUNCTION,
+  STYSTATEMENT,
+  STYGPI,
+  STYCONSTRAINT,
+}
+export interface ISourceMapEntity {
+  type: SourceEntityType;
+  name: string;
+}
+export interface ISourceRef {
+  entity: ISourceMapEntity;
+  type: SourceProgramType;
+  lineStart: number;
+  lineEnd: number;
+  colStart: number;
+  colEnd: number;
+}
+export class ShapeSourceMap {
+  private rep = {};
+  public add(ref: ISourceRef): void {
+    if (!(ref.entity.type in this.rep)) {
+      this.rep[ref.entity.type] = {};
+    }
+    if (!(ref.entity.name in this.rep[ref.entity.type])) {
+      this.rep[ref.entity.type][ref.entity.name] = [];
+    }
+    this.rep[ref.entity.type][ref.entity.name].push(ref);
+    console.log(`Added to source map: ${JSON.stringify(ref)}`);
+  }
+  public getRefs(): ISourceRef[] {
+    const returnList: ISourceRef[] = [];
+    for (const type in this.rep) {
+      for (const name in this.rep[type]) {
+        returnList.push(this.rep[type][name]);
+      }
+    }
+    return returnList;
+  }
+  public getRefsByEntity(entity: ISourceMapEntity): ISourceRef[] {
+    const returnList: ISourceRef[] = [];
+    if (entity.type in this.rep && entity.name in this.rep[entity.type]) {
+      returnList.push(this.rep[entity.type][entity.name]);
+    }
+    return returnList;
+  }
 }

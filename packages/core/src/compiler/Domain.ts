@@ -71,7 +71,10 @@ export const compileDomain = (prog: string): Result<Env, PenroseError> => {
   if (astOk.isOk()) {
     const ast = astOk.value;
     return checkDomain(ast).match({
-      Ok: (env) => ok(env),
+      Ok: (env) => {
+        env["ast"] = ast;
+        return ok(env);
+      },
       Err: (e) => err({ ...e, errorType: "DomainError" }),
     });
   } else {

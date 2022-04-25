@@ -394,3 +394,4 @@ export type { SubProg };
 export type { Canvas };
 export type { FieldDict };
 export type { Translation };
+export type { State };

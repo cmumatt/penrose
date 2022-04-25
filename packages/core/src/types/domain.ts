@@ -103,5 +103,6 @@ export interface Env {
   preludeValues: Map<string, TypeConstructor<C>>; // TODO: store as Substance values?
   subTypes: [TypeConstructor<C>, TypeConstructor<C>][];
   typeGraph: Graph;
+  ast?: DomainProg<A>;
 }
 //#endregion
