@@ -37,9 +37,14 @@ import seedrandom from "seedrandom";
 import { Canvas } from "shapes/Samplers";
 import { ShapeDef, shapedefs } from "shapes/Shapes";
 import { VarAD } from "types/ad";
-import { A, C, Identifier } from "types/ast";
+import { A, ASTNode, C, Identifier } from "types/ast";
 import { Either, Left, Right } from "types/common";
-import { ConstructorDecl, Env, TypeConstructor } from "types/domain";
+import {
+  ConstructorDecl,
+  DomainProg,
+  Env,
+  TypeConstructor,
+} from "types/domain";
 import {
   ParseError,
   PenroseError,
@@ -3397,8 +3402,7 @@ export const compileStyle = (
 
   // Map objects to its original program statements,
   const shapeSourceMap: ShapeSourceMap = mapShapesToSource(
-    varEnv,
-    subEnv,
+    varEnv.ast as DomainProg<unknown>,
     subProg,
     styProg
   );
@@ -3433,18 +3437,80 @@ export const compileStyle = (
   return ok(initState.value);
 };
 
+// Mapping rule Registry
+enum NameMapRules {
+  SKIP,
+  OP,
+  VALUE,
+  CONTENTS,
+  CONTENTS_VALUE,
+  TYPE_VALUE,
+  TYPE_NAME_VALUE,
+  NAME_VALUE,
+  NAME_CONTENTS_VALUE,
+  HEADER_CONTENTS_CONTENTS_VALUE,
+  PROPERTY_PATH,
+  FIELD_PATH,
+  TAG,
+}
+
+/**
+ *
+ * @param node  The AST Node to name
+ * @param rule  Rule to apply to the node to extract its name
+ * @returns
+ */
+const mapEntityName = (node: ASTNode<unknown>, rule: NameMapRules): string => {
+  switch (rule) {
+    case NameMapRules.SKIP:
+      return "";
+    case NameMapRules.OP:
+      return node["op"];
+    case NameMapRules.TAG:
+      return node["tag"];
+    case NameMapRules.VALUE:
+      return node["value"];
+    case NameMapRules.CONTENTS:
+      return node["contents"];
+    case NameMapRules.CONTENTS_VALUE:
+      return node["contents"]["value"];
+    case NameMapRules.TYPE_VALUE:
+      return node["type"]["value"];
+    case NameMapRules.TYPE_NAME_VALUE:
+      return node["type"]["name"]["value"];
+    case NameMapRules.NAME_VALUE:
+      return node["name"]["value"];
+    case NameMapRules.NAME_CONTENTS_VALUE:
+      return node["name"]["contents"]["value"];
+    case NameMapRules.HEADER_CONTENTS_CONTENTS_VALUE:
+      return node["contents"]["contents"]["value"];
+    case NameMapRules.PROPERTY_PATH:
+      return (
+        node["name"]["contents"]["value"] +
+        "." +
+        node["field"]["value"] +
+        "." +
+        node["property"]["value"]
+      );
+    case NameMapRules.FIELD_PATH:
+      return node["name"]["contents"]["value"] + "." + node["field"]["value"];
+    default:
+      throw new Error(`Unhandled mapEntityName type: ${rule}`);
+  }
+};
+
 /**
  * Map shapes to their original source code
  *
- * @param varEnv
- * @param subEnv
+ * TODO: The style piece should probably be here, but not the other parts.  !!!
+ *
+ * @param domProg
  * @param subProg
  * @param styProg
  * @returns ShapeSourceMap
  */
 const mapShapesToSource = (
-  varEnv: Env,
-  subEnv: SubstanceEnv,
+  domProg: DomainProg<unknown>,
   subProg: SubProg<unknown>,
   styProg: StyProg<unknown>
 ): ShapeSourceMap => {
@@ -3453,163 +3519,334 @@ const mapShapesToSource = (
   // ------------------------------------------------------------------------
   // Style: resolve GPIs to rules and Substance objects
   // ------------------------------------------------------------------------
+  // Application of mapping rules to Style AST data for outputting Source Map
+  const styAstMap = {
+    StyProg: {
+      map: NameMapRules.SKIP,
+      subs: [["blocks"]],
+    },
+    HeaderBlock: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["header"], ["block", "statements"]],
+    },
+    PathAssign: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["path"], ["value"]],
+    },
+    Selector: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["head"], ["where"]],
+    },
+    DeclPatterns: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    DeclPattern: {
+      map: NameMapRules.TYPE_VALUE,
+      type: SourceEntityType.DOMTYPE,
+      subs: [["id"]],
+    },
+    StyVar: {
+      map: NameMapRules.CONTENTS_VALUE,
+      type: SourceEntityType.STYVAR,
+      subs: [],
+    },
+    LocalVar: {
+      map: NameMapRules.CONTENTS_VALUE,
+      type: SourceEntityType.STYLOCAL,
+      subs: [],
+    },
+    RelationPatterns: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    RelPred: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.DOMPREDICATE, // !!! Always a predicate?
+      subs: [["args"]],
+    },
+    SEBind: {
+      map: NameMapRules.SKIP,
+      subs: [["contents"]],
+    },
+    Fix: {
+      map: NameMapRules.CONTENTS,
+      type: SourceEntityType.STYNUMLIT,
+      subs: [],
+    },
+    StringLit: {
+      map: NameMapRules.CONTENTS,
+      type: SourceEntityType.STYSTRLIT,
+      subs: [],
+    },
+    InternalLocalVar: {
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+    ObjFn: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.STYFUNCTION,
+      subs: [["args"]],
+    },
+    ConstrFn: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.STYFUNCTION,
+      subs: [["args"]],
+    },
+    FieldPath: {
+      map: NameMapRules.FIELD_PATH,
+      type: SourceEntityType.STYLANG,
+      subs: [],
+    },
+    GPIDecl: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["shapeName"], ["properties"]],
+    },
+    Namespace: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    Layering: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["above"], ["below"]],
+    },
+    BinOp: {
+      map: NameMapRules.OP,
+      type: SourceEntityType.STYFUNCTION,
+      subs: [["left"], ["right"]],
+    },
+    PropertyDecl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.STYPROPERTY,
+      subs: [["value"]],
+    },
+    PropertyPath: {
+      map: NameMapRules.PROPERTY_PATH,
+      type: SourceEntityType.STYPROPERTY,
+      subs: [],
+    },
+    Vector: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    CompApp: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.STYFUNCTION,
+      subs: [["args"]],
+    },
+    Identifier: {
+      map: NameMapRules.VALUE,
+      type: SourceEntityType.STYVAR,
+      subs: [],
+    },
+  };
+  mapAstNodesToSource(styProg, styAstMap, SourceProgramType.STYLE, sourceMap);
 
   // ------------------------------------------------------------------------
   // Substance: resolve Substance objects to types and predicates
-  //            TODO: Should probably be done in Substance compiler
+  //            TODO: Should probably be done in Substance compiler !!!
   // ------------------------------------------------------------------------
-  subProg.statements.forEach((stmt) => {
-    switch (stmt.tag) {
-      case "AutoLabel": {
-        break;
-      }
-
-      case "Decl": {
-        sourceMap.add({
-          entity: { type: SourceEntityType.SUBOBJECT, name: stmt.name.value },
-          ...mapTemplate(SourceProgramType.SUBSTANCE, stmt),
-        });
-        break;
-      }
-
-      case "ApplyPredicate": {
-        // Add the predicate to the map
-        sourceMap.add({
-          entity: {
-            type: SourceEntityType.SUBPREDICATE,
-            name: stmt.name.value,
-          },
-          ...mapTemplate(SourceProgramType.SUBSTANCE, stmt),
-        });
-
-        // Add args to our queue for processing
-        const argQueue = stmt.args;
-        while (argQueue.length > 0) {
-          // Pop item off the queue and add any entities it references
-          const arg = argQueue.pop() as SubPredArg<unknown>;
-          if ("args" in arg && arg.args.length > 0) {
-            argQueue.push(...arg.args);
-          }
-
-          if (arg.tag == "Func") {
-            // Add the function to the map
-            sourceMap.add({
-              entity: {
-                type: SourceEntityType.SUBFUNCTION,
-                name: arg.name.value,
-              },
-              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
-            });
-          } else if (arg.tag == "ApplyPredicate") {
-            // Add the predicate to the map
-            sourceMap.add({
-              entity: {
-                type: SourceEntityType.SUBPREDICATE,
-                name: arg.name.value,
-              },
-              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
-            });
-          } else if (arg.tag == "Identifier") {
-            // Add the identifier to the map
-            sourceMap.add({
-              entity: { type: SourceEntityType.SUBOBJECT, name: arg.value },
-              ...mapTemplate(SourceProgramType.SUBSTANCE, arg),
-            });
-          } else {
-            console.log(JSON.stringify(arg));
-            console.log(
-              `Unhandled arg type in Substance program: ${arg.tag} at line ${arg["start"].line})`
-            );
-            throw new Error("Unhandled arg type");
-          }
-        }
-        break;
-      }
-
-      default: {
-        console.log(
-          `Unhandled node type in Substance program: ${stmt.tag} at line ${stmt["start"].line})`
-        );
-        throw new Error("Unhandled substance node type type");
-      }
-    }
-  });
+  // Application of mapping rules to AST data for outputting Source Map
+  const subAstMap = {
+    SubProg: {
+      map: NameMapRules.SKIP,
+      subs: [["statements"]],
+    },
+    Decl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.SUBOBJECT,
+      subs: [],
+    },
+    ApplyPredicate: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.SUBPREDICATE,
+      subs: [["args"]],
+    },
+    Func: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.SUBFUNCTION,
+      subs: [["args"]],
+    },
+    Identifier: {
+      map: NameMapRules.VALUE,
+      type: SourceEntityType.SUBOBJECT,
+      subs: [],
+    },
+    AutoLabel: {
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+  };
+  mapAstNodesToSource(
+    subProg,
+    subAstMap,
+    SourceProgramType.SUBSTANCE,
+    sourceMap
+  );
 
   // ------------------------------------------------------------------------
   // Domain: Resolve predicates, functions, etc. to source locations
-  //         TODO: Should probably be done in Domain compiler
+  //         TODO: Should probably be done in Domain compiler !!!
   // ------------------------------------------------------------------------
-  if ("ast" in varEnv) {
-    const ast = varEnv.ast;
-    if (ast !== undefined) {
-      ast.statements.forEach((stmt) => {
-        switch (stmt.tag) {
-          case "TypeDecl": {
-            sourceMap.add({
-              entity: { type: SourceEntityType.DOMTYPE, name: stmt.name.value },
-              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
-            });
-            break;
-          }
+  // Application of mapping rules to AST data for outputting Source Map
+  const domAstMap = {
+    DomainProg: {
+      map: NameMapRules.SKIP,
+      subs: [["statements"]],
+    },
+    TypeDecl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.DOMTYPE,
+      subs: [["params"], ["supertypes"]],
+    },
+    FunctionDecl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.DOMFUNCTION,
+      subs: [["params"], ["args"], ["output"]],
+    },
+    ConstructorDecl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.DOMCONSTRUCTOR,
+      subs: [["params"], ["args"], ["output"]],
+    },
+    PredicateDecl: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.DOMPREDICATE,
+      subs: [["params"], ["args"], ["output"]],
+    },
+    Arg: {
+      map: NameMapRules.SKIP,
+      subs: [["variable"], ["type"]],
+    },
+    TypeConstructor: {
+      map: NameMapRules.SKIP,
+      subs: [["name"], ["args"]],
+    },
+    TypeVar: {
+      map: NameMapRules.SKIP,
+      subs: [["name"]],
+    },
+    Identifier: {
+      map: NameMapRules.VALUE,
+      type: SourceEntityType.DOMTYPE,
+      subs: [],
+    },
+    Prop: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.DOMPROP,
+      subs: [],
+    },
+    SubTypeDecl: {
+      // Not yet implemented
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+    PreludeDecl: {
+      // Not yet implemented
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+    NotationDecl: {
+      // Not yet implemented
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+  };
+  mapAstNodesToSource(domProg, domAstMap, SourceProgramType.DOMAIN, sourceMap);
 
-          case "FunctionDecl": {
-            sourceMap.add({
-              entity: {
-                type: SourceEntityType.DOMFUNCTION,
-                name: stmt.name.value,
-              },
-              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
-            });
-            break;
-          }
+  return sourceMap;
+};
 
-          case "ConstructorDecl": {
-            sourceMap.add({
-              entity: {
-                type: SourceEntityType.DOMCONSTRUCTOR,
-                name: stmt.name.value,
-              },
-              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
-            });
-            break;
-          }
+/**
+ * Map shapes to their original source code
+ *
+ * TODO: The style piece should probably be here, but not the other parts.  !!!
+ *
+ * @param ast AST to map to source statements
+ * @param map Map of AST nodes to their original source code
+ * @param pgmType Source Program Type (Style, Substance, Domain)
+ * @param sourceMap
+ * @returns ShapeSourceMap
+ */
+const mapAstNodesToSource = (
+  ast: ASTNode<unknown>,
+  map: any,
+  pgmType: SourceProgramType,
+  sourceMap?: ShapeSourceMap
+): ShapeSourceMap => {
+  // Create a new source map if one wasn't provided
+  if (sourceMap === undefined) {
+    sourceMap = new ShapeSourceMap();
+  }
 
-          case "PredicateDecl": {
-            sourceMap.add({
-              entity: {
-                type: SourceEntityType.DOMPREDICATE,
-                name: stmt.name.value,
-              },
-              ...mapTemplate(SourceProgramType.DOMAIN, stmt),
-            });
-            break;
-          }
+  // Initially fill the stack with the list of AST block nodes
+  const nodeStack: ASTNode<unknown>[] = [ast];
+  while (nodeStack.length > 0) {
+    // Pop item off the stack
+    const node = nodeStack.pop() as ASTNode<unknown>;
+    //console.log(`Processing AST node: ${node.tag}`);
 
-          case "SubTypeDecl": {
-            // Not yet supported
+    // Add any subnodes in this node to the stack for subsequent processing
+    if (node.tag in map && "subs" in map[node.tag]) {
+      map[node.tag].subs.forEach((sub: string[]) => {
+        let nodesToAdd;
+        switch (sub.length) {
+          case 1:
+            nodesToAdd = node[sub[0]];
             break;
-          }
-
-          case "PreludeDecl": {
-            // Not yet supported
+          case 2:
+            nodesToAdd = node[sub[0]][sub[1]];
             break;
-          }
-
-          case "NotationDecl": {
-            // Not yet supported
+          case 3:
+            nodesToAdd = node[sub[0]][sub[1]][sub[2]];
             break;
-          }
+          case 4:
+            nodesToAdd = node[sub[0]][sub[1]][sub[2]][sub[3]];
+            break;
+          default:
+            throw new Error(`Invalid sub node length: ${sub.length}`);
+        }
+        if (nodesToAdd !== undefined) {
+          Array.isArray(nodesToAdd)
+            ? nodeStack.push(...nodesToAdd.reverse())
+            : nodeStack.push(nodesToAdd);
         }
       });
+
+      // Map the node into the source map -- if needed
+      const name: string = mapEntityName(node, map[node.tag].map);
+      if (name !== "") {
+        sourceMap.add({
+          entity: { type: map[node.tag].type, name: name },
+          ...mapTemplate(pgmType, node),
+        });
+      }
+    } else {
+      console.log(` - Skipping unknown node: ${node.tag}`);
     }
   }
 
   return sourceMap;
 };
 
+/**
+ * Helper function to generate a source map refernece
+ * @param mode Source Program Type
+ * @param node AST Node to Process
+ * @returns
+ */
 const mapTemplate = (
   mode: SourceProgramType,
-  stmt: any
+  node: ASTNode<unknown>
 ): {
   type: SourceProgramType;
   lineStart: number;
@@ -3617,17 +3854,17 @@ const mapTemplate = (
   colStart: number;
   colEnd: number;
 } => {
-  if (!("start" in stmt)) {
-    stmt["start"] = { line: 0, col: 0 };
+  if (!("start" in node)) {
+    node["start"] = { line: 0, col: 0 };
   }
-  if (!("end" in stmt)) {
-    stmt["end"] = { line: 0, col: 0 };
+  if (!("end" in node)) {
+    node["end"] = { line: 0, col: 0 };
   }
   return {
     type: mode,
-    lineStart: stmt.start.line,
-    lineEnd: stmt.end.line,
-    colStart: stmt.start.col,
-    colEnd: stmt.end.col,
+    lineStart: node["start"].line,
+    lineEnd: node["end"].line,
+    colStart: node["start"].col,
+    colEnd: node["end"].col,
   };
 };
