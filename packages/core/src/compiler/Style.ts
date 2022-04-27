@@ -3449,6 +3449,7 @@ enum NameMapRules {
   NAME_VALUE,
   NAME_CONTENTS_VALUE,
   HEADER_CONTENTS_CONTENTS_VALUE,
+  VARIABLE_VALUE,
   PROPERTY_PATH,
   FIELD_PATH,
   TAG,
@@ -3484,6 +3485,8 @@ const mapEntityName = (node: ASTNode<unknown>, rule: NameMapRules): string => {
       return node["name"]["contents"]["value"];
     case NameMapRules.HEADER_CONTENTS_CONTENTS_VALUE:
       return node["contents"]["contents"]["value"];
+    case NameMapRules.VARIABLE_VALUE:
+      return node["variable"]["value"];
     case NameMapRules.PROPERTY_PATH:
       return (
         node["name"]["contents"]["value"] +
@@ -3648,6 +3651,65 @@ const mapShapesToSource = (
       type: SourceEntityType.STYVAR,
       subs: [],
     },
+    AccessPath: { // Not Yet Implemented
+      map: NameMapRules.SKIP,
+      subs: [],
+    },
+    BoolLit: {
+      map: NameMapRules.CONTENTS,
+      type: SourceEntityType.STYBOOLIT,
+      subs: [],
+    },
+    Override: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["path"],["value"]],
+    },
+    SubVar: {
+      map: NameMapRules.CONTENTS_VALUE,
+      type: SourceEntityType.SUBOBJECT,
+      subs: [],
+    },
+    Delete: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    Tuple: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    List: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["contents"]],
+    },
+    Vary: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYNUMVAR,
+      subs: [],
+    },
+    VaryInit: {
+      map: NameMapRules.CONTENTS,
+      type: SourceEntityType.STYNUMVAR,
+      subs: [],
+    },
+    UOp: {
+      map: NameMapRules.OP,
+      type: SourceEntityType.STYFUNCTION,
+      subs: [["arg"]],
+    },
+    RelBind: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.STYLANG,
+      subs: [["id"],["expr"]],
+    },
+    SEFuncOrValCons :{
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.STYVAR, // Not sure this is right
+      subs: [["args"]],
+    },
   };
   mapAstNodesToSource(styProg, styAstMap, SourceProgramType.STYLE, sourceMap);
 
@@ -3684,6 +3746,26 @@ const mapShapesToSource = (
     AutoLabel: {
       map: NameMapRules.SKIP,
       subs: [],
+    },
+    LabelDecl: {
+      map: NameMapRules.TAG,
+      type: SourceEntityType.SUBLABEL,
+      subs: [["variable"]],
+    },
+    Bind: {
+      map: NameMapRules.VARIABLE_VALUE,
+      type: SourceEntityType.SUBOBJECT,
+      subs: [["expr"]],
+    },
+    ApplyConstructor: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.SUBCONSTRUCTOR,
+      subs: [["args"]],
+    },
+    ApplyFunction: {
+      map: NameMapRules.NAME_VALUE,
+      type: SourceEntityType.SUBFUNCTION,
+      subs: [["args"]],
     },
   };
   mapAstNodesToSource(
