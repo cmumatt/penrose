@@ -56,6 +56,8 @@ import {
 } from "types/errors";
 import {
   Fn,
+  ISourceMapEntity,
+  ISourceRef,
   OptType,
   Params,
   ShapeSourceMap,
@@ -3651,7 +3653,8 @@ const mapShapesToSource = (
       type: SourceEntityType.STYVAR,
       subs: [],
     },
-    AccessPath: { // Not Yet Implemented
+    AccessPath: {
+      // Not Yet Implemented
       map: NameMapRules.SKIP,
       subs: [],
     },
@@ -3663,7 +3666,7 @@ const mapShapesToSource = (
     Override: {
       map: NameMapRules.TAG,
       type: SourceEntityType.STYLANG,
-      subs: [["path"],["value"]],
+      subs: [["path"], ["value"]],
     },
     SubVar: {
       map: NameMapRules.CONTENTS_VALUE,
@@ -3703,9 +3706,9 @@ const mapShapesToSource = (
     RelBind: {
       map: NameMapRules.TAG,
       type: SourceEntityType.STYLANG,
-      subs: [["id"],["expr"]],
+      subs: [["id"], ["expr"]],
     },
-    SEFuncOrValCons :{
+    SEFuncOrValCons: {
       map: NameMapRules.NAME_VALUE,
       type: SourceEntityType.STYVAR, // Not sure this is right
       subs: [["args"]],
@@ -3907,10 +3910,9 @@ const mapAstNodesToSource = (
       // Map the node into the source map -- if needed
       const name: string = mapEntityName(node, map[node.tag].map);
       if (name !== "") {
-        sourceMap.add({
-          entity: { type: map[node.tag].type, name: name },
-          ...mapTemplate(pgmType, node),
-        });
+        sourceMap.add(
+          mapTemplate(pgmType, node, { type: map[node.tag].type, name: name })
+        );
       }
     } else {
       console.log(` - Skipping unknown node: ${node.tag}`);
@@ -3922,20 +3924,16 @@ const mapAstNodesToSource = (
 
 /**
  * Helper function to generate a source map refernece
- * @param mode Source Program Type
+ * @param origin Source Program Type (e.g., Style, Substance, Domain)
  * @param node AST Node to Process
- * @returns
+ * @param entity Entity name and type
+ * @returns ISourceRef
  */
 const mapTemplate = (
-  mode: SourceProgramType,
-  node: ASTNode<unknown>
-): {
-  type: SourceProgramType;
-  lineStart: number;
-  lineEnd: number;
-  colStart: number;
-  colEnd: number;
-} => {
+  origin: SourceProgramType,
+  node: ASTNode<unknown>,
+  entity: ISourceMapEntity
+): ISourceRef => {
   if (!("start" in node)) {
     node["start"] = { line: 0, col: 0 };
   }
@@ -3943,7 +3941,8 @@ const mapTemplate = (
     node["end"] = { line: 0, col: 0 };
   }
   return {
-    type: mode,
+    entity: entity,
+    origin: origin,
     lineStart: node["start"].line,
     lineEnd: node["end"].line,
     colStart: node["start"].col,

@@ -224,7 +224,7 @@ export interface ISourceMapEntity {
 }
 export interface ISourceRef {
   entity: ISourceMapEntity;
-  type: SourceProgramType;
+  origin: SourceProgramType; // e.g. DOMAIN, SUBSTANCE, STYLE
   lineStart: number;
   lineEnd: number;
   colStart: number;
