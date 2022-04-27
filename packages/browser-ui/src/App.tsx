@@ -15,12 +15,12 @@ import {
 } from "@penrose/core";
 import animalNameList from "animals";
 import colorNameList from "color-name-list";
-import Inspector from "inspector/Inspector";
 import { isEqual } from "lodash";
 import * as React from "react";
 import SplitPane from "react-split-pane";
-import ButtonBar from "ui/ButtonBar";
-import { FileSocket, FileSocketResult } from "ui/FileSocket";
+import Inspector from "./inspector/Inspector";
+import ButtonBar from "./ui/ButtonBar";
+import { FileSocket, FileSocketResult } from "./ui/FileSocket";
 
 //#region variation generation
 
@@ -148,11 +148,15 @@ class App extends React.Component<unknown, ICanvasState> {
   };
   public downloadSVG = async (): Promise<void> => {
     if (this.state.fileSocket) {
-      const rendering = await RenderStatic(
-        this.state.currentState,
-        this.state.fileSocket.getFile
-      );
-      DownloadSVG(rendering);
+      if (this.state.currentState) {
+        const rendering = await RenderStatic(
+          this.state.currentState,
+          this.state.fileSocket.getFile
+        );
+        DownloadSVG(rendering);
+      } else {
+        console.error("current state is undefined");
+      }
     } else {
       console.error("File socket uninitialized");
     }
