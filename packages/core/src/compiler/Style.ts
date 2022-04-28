@@ -1363,15 +1363,21 @@ const relMatchesProg = (
   typeEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  rel: RelationPattern<A>
+  rel: RelationPattern<A>,
+  styDebugBlock: BlockDebugInfo
 ): boolean => {
+  console.log(`     - relMatchesProg: ${JSON.stringify(removeChildren(rel))}`); // !!!
   if (rel.tag === "RelField") {
     // the current pattern matches on a Style field
     const subName = rel.name.contents.value;
     const fieldDesc = rel.fieldDescriptor;
     const label = subEnv.labels.get(subName);
-
+    console.log(`       - subName   : ${subName}`); // !!!
+    console.log(`       - fieldDesc : ${JSON.stringify(removeChildren(fieldDesc))}`); // !!!
+    console.log(`       - label     : ${JSON.stringify(removeChildren(label))}`); // !!!
     if (label) {
+      console.log(`       - labelType : ${JSON.stringify(removeChildren(label.type))}`); // !!!
+      console.log(`       - labelValue: ${label.value}`); // !!!
       // check if the label type matches with the descriptor
       if (fieldDesc) {
         // NOTE: empty labels have a specific `NoLabel` type, so even if the entry exists, no existing field descriptors will match on it.
@@ -1381,9 +1387,17 @@ const relMatchesProg = (
       return false;
     }
   } else {
-    return subProg.statements.some((line) =>
-      relMatchesLine(typeEnv, subEnv, line, rel)
-    );
+    const result = subProg.statements.some((line) => {
+      const result = relMatchesLine(typeEnv, subEnv, line, rel);
+      //if(result) console.log(`     - relMatchLn: ${result} : ${JSON.stringify(removeChildren(line))}`); // !!!
+      return result;      
+    });
+    if(result) {
+      
+    } else {
+      console.log(`       - This rel FAILS due to this condition at ${rel["start"].line}:${rel["start"].col}-${rel["end"].line}:${rel["end"].col} NOT being true`); // !!!:
+    }
+    return result;
   }
 };
 
@@ -1392,9 +1406,11 @@ const allRelsMatch = (
   typeEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  rels: RelationPattern<A>[]
+  rels: RelationPattern<A>[],
+  styDbgBlock: BlockDebugInfo
 ): boolean => {
-  return rels.every((rel) => relMatchesProg(typeEnv, subEnv, subProg, rel));
+  //console.log('     --------------------------------'); // !!!
+  return rels.every((rel) => relMatchesProg(typeEnv, subEnv, subProg, rel, styDbgBlock));
 };
 
 // Judgment 17. b; [theta] |- [S] <| [|S_r] ~> [theta']
@@ -1404,7 +1420,8 @@ const filterRels = (
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
   rels: RelationPattern<A>[],
-  substs: Subst[]
+  substs: Subst[],
+  styDbgBlock: BlockDebugInfo,
 ): Subst[] => {
   const subProgFiltered: SubProg<A> = {
     ...subProg,
@@ -1413,9 +1430,10 @@ const filterRels = (
     ),
   };
 
-  return substs.filter((subst) =>
-    allRelsMatch(typeEnv, subEnv, subProgFiltered, substituteRels(subst, rels))
-  );
+  return substs.filter((subst) => {
+    console.log(`   - Testing: ${JSON.stringify(subst)}`); // !!!
+    return allRelsMatch(typeEnv, subEnv, subProgFiltered, substituteRels(subst, rels), styDbgBlock)
+  });
 };
 
 // // Match declaration statements
@@ -1545,7 +1563,8 @@ const findSubstsSel = (
   varEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  [header, selEnv]: [Header<A>, SelEnv]
+  [header, selEnv]: [Header<A>, SelEnv],
+  styDbg: StyleDebugInfo,
 ): Subst[] => {
   switch (header.tag) {
     case "Selector": {
@@ -1557,14 +1576,28 @@ const findSubstsSel = (
       const substCandidates = rawSubsts.filter((subst) =>
         fullSubst(selEnv, subst)
       );
+
+      // !!!
+      const styDbgBlock: BlockDebugInfo = {
+        sel: sel,
+        sats: [],
+        unsats: [],
+      }
+      styDbg.blocks.push(styDbgBlock);
+      console.log(`Block is: ${JSON.stringify(removeChildren({head:header,where:header.where}))}`); // !!!
+      console.log(` - rawSubsts:       ${JSON.stringify(removeChildren(rawSubsts))}`); // !!!
+      console.log(` - substCandidates: ${JSON.stringify(removeChildren(substCandidates))}`); // !!!
       const filteredSubsts = filterRels(
         varEnv,
         subEnv,
         subProg,
         rels,
-        substCandidates
+        substCandidates,
+        styDbgBlock
       );
       const correctSubsts = filteredSubsts.filter(uniqueKeysAndVals);
+      console.log(` - filteredSubsts:  ${JSON.stringify(removeChildren(filteredSubsts))}`); // !!!
+      console.log(` - correctSubsts:   ${JSON.stringify(removeChildren(correctSubsts))}`); // !!!
       return correctSubsts;
     }
     case "Namespace": {
@@ -2064,7 +2097,8 @@ const translatePair = (
   subProg: SubProg<A>,
   trans: Translation,
   hb: HeaderBlock<A>,
-  blockNum: number
+  blockNum: number,
+  styDbg: StyleDebugInfo,
 ): Either<StyleErrors, Translation> => {
   switch (hb.header.tag) {
     case "Namespace": {
@@ -2111,7 +2145,7 @@ const translatePair = (
       const substs = findSubstsSel(varEnv, subEnv, subProg, [
         hb.header,
         selEnv,
-      ]);
+      ], styDbg);
       log.debug("Translating block", hb, "with substitutions", substs);
       return translateSubstsBlock(trans, numbered(substs), [
         hb.block,
@@ -2192,13 +2226,14 @@ const translateStyProg = (
   styProg: StyProg<A>,
   labelMap: LabelMap,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  styVals: number[]
+  styVals: number[],
+  styDbg: StyleDebugInfo, // !!!
 ): Either<StyleErrors, Translation> => {
   // COMBAK: Deal with styVals
 
   const res = foldM(
     styProg.blocks,
-    (trans, hb, i) => translatePair(varEnv, subEnv, subProg, trans, hb, i),
+    (trans, hb, i) => translatePair(varEnv, subEnv, subProg, trans, hb, i, styDbg),
     initTrans()
   );
 
@@ -3044,7 +3079,9 @@ const genState = (
 
   const uninitializedPaths = findUninitialized(trans);
   const shapePathList: [string, string][] = findShapeNames(trans);
+  console.log(`Shapes: ${JSON.stringify(removeChildren(shapePathList))}`); // !!!
   const shapePaths = shapePathList.map(mkPath);
+  console.log(`ShapePaths: ${JSON.stringify(removeChildren(shapePaths))}`); // !!!
 
   const canvasErrs = checkCanvas(trans);
   if (canvasErrs.length > 0) {
@@ -3401,26 +3438,38 @@ export const compileStyle = (
     return err(toStyleErrors(selErrs));
   }
 
-  log.info("selEnvs", selEnvs);
+  log.info("selEnvs", JSON.stringify(removeChildren(selEnvs)));
 
   // Translate style program
   const styVals: number[] = []; // COMBAK: Deal with style values when we have plugins
+  const styDebugInfo: StyleDebugInfo = {
+    blocks: [],
+  };
+  console.log("Translating style program...."); //!!!
   const translateRes = translateStyProg(
     varEnv,
     subEnv,
     subProg,
     styProg,
     labelMap,
-    styVals
+    styVals,
+    styDebugInfo, // !!!
   );
+  console.log("Done Translating style program...."); //!!!
+  console.log(`Translation: ${JSON.stringify(removeChildren(translateRes))}`); //!!!")
 
-  // Map objects to its original program statements,
+  // Map objects to original program statements
+  // TODO: Thids is not the right place for this. !!!
+  console.log("Building source map...."); //!!!
   const shapeSourceMap: ShapeSourceMap = mapShapesToSource(
     varEnv.ast as DomainProg<unknown>,
+    "", // !!! Should be domain program source  - fix when moved out of compileStyle()
     subProg,
-    styProg
+    "", // !!! Should be Substance program source - fix when moved out of compileStyle()
+    styProg,
+    stySource
   );
-
+  console.log("Done Building source map...."); //!!!
   log.info("translation (before genOptProblem)", translateRes);
 
   // Translation failed somewhere
@@ -3437,11 +3486,13 @@ export const compileStyle = (
   }
 
   // TODO(errors): `findExprsSafe` shouldn't fail (as used in `genOptProblemAndState`, since all the paths are generated from the translation) but could always be safer...
+  console.log("Calling genState..."); //!!!
   const initState: Result<State, StyleErrors> = genState(
     variation,
     trans,
     shapeSourceMap
   );
+  console.log("Done Calling genState..."); //!!!
   log.info("init state from GenOptProblem", initState);
 
   if (initState.isErr()) {
@@ -3450,6 +3501,21 @@ export const compileStyle = (
 
   return ok(initState.value);
 };
+
+// !!!
+type StyleDebugInfo = {
+  blocks: BlockDebugInfo[]
+
+};
+type BlockDebugInfo = {
+  sel: Selector<unknown>;
+  sats: VarMapDebugInfo[];
+  unsats: VarMapDebugInfo[];
+};
+type VarMapDebugInfo = {
+  vars: { [subVar: string]: string };
+  reasons: [];
+}
 
 // Mapping rule Registry
 enum NameMapRules {
@@ -3468,6 +3534,11 @@ enum NameMapRules {
   FIELD_PATH,
   TAG,
 }
+
+// Structure for declaring rules that map AST nodes to Source Mappings
+type AstSourceMap = {
+  [k: string]: { map: NameMapRules; type?: SourceEntityType; subs: string[][] };
+};
 
 /**
  *
@@ -3522,22 +3593,29 @@ const mapEntityName = (node: ASTNode<unknown>, rule: NameMapRules): string => {
  * TODO: The style piece should probably be here, but not the other parts.  !!!
  *
  * @param domProg
+ * @param domSrc
  * @param subProg
+ * @param subSrc
  * @param styProg
+ * @param stySrc
  * @returns ShapeSourceMap
  */
 const mapShapesToSource = (
   domProg: DomainProg<unknown>,
+  domSrc: string,
   subProg: SubProg<unknown>,
-  styProg: StyProg<unknown>
+  subSrc: string,
+  styProg: StyProg<unknown>,
+  stySrc: string,
 ): ShapeSourceMap => {
-  const sourceMap: ShapeSourceMap = new ShapeSourceMap();
+  // Create the source map
+  const sourceMap: ShapeSourceMap = new ShapeSourceMap(domSrc,subSrc,stySrc);
 
   // ------------------------------------------------------------------------
   // Style: resolve GPIs to rules and Substance objects
   // ------------------------------------------------------------------------
   // Application of mapping rules to Style AST data for outputting Source Map
-  const styAstMap = {
+  const styAstMap: AstSourceMap = {
     StyProg: {
       map: NameMapRules.SKIP,
       subs: [["blocks"]],
@@ -3733,7 +3811,7 @@ const mapShapesToSource = (
   //            TODO: Should probably be done in Substance compiler !!!
   // ------------------------------------------------------------------------
   // Application of mapping rules to AST data for outputting Source Map
-  const subAstMap = {
+  const subAstMap: AstSourceMap = {
     SubProg: {
       map: NameMapRules.SKIP,
       subs: [["statements"]],
@@ -3795,7 +3873,7 @@ const mapShapesToSource = (
   //         TODO: Should probably be done in Domain compiler !!!
   // ------------------------------------------------------------------------
   // Application of mapping rules to AST data for outputting Source Map
-  const domAstMap = {
+  const domAstMap: AstSourceMap = {
     DomainProg: {
       map: NameMapRules.SKIP,
       subs: [["statements"]],
@@ -3876,15 +3954,10 @@ const mapShapesToSource = (
  */
 const mapAstNodesToSource = (
   ast: ASTNode<unknown>,
-  map: any,
+  map: AstSourceMap,
   pgmType: SourceProgramType,
-  sourceMap?: ShapeSourceMap
+  sourceMap: ShapeSourceMap
 ): ShapeSourceMap => {
-  // Create a new source map if one wasn't provided
-  if (sourceMap === undefined) {
-    sourceMap = new ShapeSourceMap();
-  }
-
   // Initially fill the stack with the list of AST block nodes
   const nodeStack: ASTNode<unknown>[] = [ast];
   while (nodeStack.length > 0) {
@@ -3923,11 +3996,11 @@ const mapAstNodesToSource = (
       const name: string = mapEntityName(node, map[node.tag].map);
       if (name !== "") {
         sourceMap.add(
-          mapTemplate(pgmType, node, { type: map[node.tag].type, name: name })
+          mapTemplate(pgmType, node, { type: map[node.tag].type, name: name } as ISourceMapEntity)
         );
       }
     } else {
-      console.log(` - Skipping unknown node: ${node.tag}`);
+      console.log(` - Skipping unknown node: ${node.tag}`); // !!!
     }
   }
 
@@ -3961,3 +4034,30 @@ const mapTemplate = (
     colEnd: node["end"].col,
   };
 };
+
+const removeChildren = ( node: any ) : any => {
+  // Array - process each element and return it
+  if(Array.isArray(node)) {
+    const newNode:unknown[] = [];
+    node.forEach( (subNode) => 
+      newNode.push(removeChildren(subNode))
+    );
+    return newNode;
+  };
+
+  // Object - except children, process each element and return it
+  if(node instanceof Object) {
+    const newNode = {};
+    let k: keyof typeof node;
+    for(k in node) {
+      if(k !== "children") {
+        newNode[k] = removeChildren(node[k]);
+      }
+    }
+    return newNode;
+  }
+
+  // Base case - return value unchanged
+  return node;
+
+}

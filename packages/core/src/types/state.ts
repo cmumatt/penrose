@@ -185,14 +185,15 @@ export interface IWeightInfo {
   epWeight: number;
 }
 
-// Mapping from shape to corresponding source file locations
-// TODO: Move this to its own type file?
-//       Make sure we're returning values not refs
+// Mapping from shape to corresponding source type locations
+// TODO: Move this to its own type file? !!!
 export enum SourceProgramType {
   DOMAIN,
   SUBSTANCE,
   STYLE,
 }
+
+// Types of entities we keep track of in source maps
 export enum SourceEntityType {
   DOMTYPE,
   DOMCONSTRUCTOR,
@@ -216,12 +217,16 @@ export enum SourceEntityType {
   STYVAR,
   STYLOCAL,
   STYLANG,
-  STYPROPERTY
+  STYPROPERTY,
 }
+
+// Named and typed entity stored in a source map
 export interface ISourceMapEntity {
   type: SourceEntityType;
   name: string;
 }
+
+// Reference to a source entity
 export interface ISourceRef {
   entity: ISourceMapEntity;
   origin: SourceProgramType; // e.g. DOMAIN, SUBSTANCE, STYLE
@@ -230,8 +235,20 @@ export interface ISourceRef {
   colStart: number;
   colEnd: number;
 }
+
+/**
+ * A source map is a mapping from source code locations to source entities.
+ */
 export class ShapeSourceMap {
   private rep = {};
+  private dom = "";
+  private sub = "";
+  private sty = "";
+  constructor(dom: string, sub: string, sty: string) {
+    this.dom = dom;
+    this.sub = sub;
+    this.sty = sty;
+  }
   public add(ref: ISourceRef): void {
     if (!(ref.entity.type in this.rep)) {
       this.rep[ref.entity.type] = {};
@@ -239,14 +256,14 @@ export class ShapeSourceMap {
     if (!(ref.entity.name in this.rep[ref.entity.type])) {
       this.rep[ref.entity.type][ref.entity.name] = [];
     }
-    this.rep[ref.entity.type][ref.entity.name].push(ref);
-    console.log(`Added to source map: ${JSON.stringify(ref)}`);
+    this.rep[ref.entity.type][ref.entity.name].push({ ...ref }); // store a copy
+    console.log(`Added to source map: ${JSON.stringify(ref)}`); // !!!
   }
   public getRefs(): ISourceRef[] {
     const returnList: ISourceRef[] = [];
     for (const type in this.rep) {
       for (const name in this.rep[type]) {
-        returnList.push(this.rep[type][name]);
+        returnList.push({ ...this.rep[type][name] }); // return a copy
       }
     }
     return returnList;
@@ -254,8 +271,40 @@ export class ShapeSourceMap {
   public getRefsByEntity(entity: ISourceMapEntity): ISourceRef[] {
     const returnList: ISourceRef[] = [];
     if (entity.type in this.rep && entity.name in this.rep[entity.type]) {
-      returnList.push(this.rep[entity.type][entity.name]);
+      returnList.push({ ...this.rep[entity.type][entity.name] }); // return a copy
     }
     return returnList;
+  }
+  public getSource(pgmType: SourceProgramType, start?: {line: number, col: number}, end?: {line: number, col:number }): string[] {
+    let source = "";
+    switch(pgmType) {
+      case SourceProgramType.DOMAIN: source = this.dom; break;
+      case SourceProgramType.SUBSTANCE: source = this.sub; break;
+      case SourceProgramType.STYLE: source = this.sty; break;
+    }
+    const lines = source.split(/\r?\n/);
+    const outLines: string[] = [];
+    for(let i = 0; i < lines.length; i++) {
+      if(start && end) {
+        if(i >= start.line && i <= end.line) {
+          if(start.line == end.line) {
+            if(start.col <= end.col) {
+              outLines.push(lines[i].substring(start.col,end.col - start.col));
+            } else {
+              outLines.push(lines[i].substring(start.col));
+            }
+          } else if (i == start.line) {
+            outLines.push(lines[i].substring(start.col));
+          } else if (i == end.line) {
+            outLines.push(lines[i].substring(0,end.col));
+          } else {
+            outLines.push(lines[i]);
+          }
+        }
+      } else {
+        outLines.push(lines[i]);
+      }
+    }
+    return outLines;
   }
 }
