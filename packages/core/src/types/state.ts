@@ -188,36 +188,36 @@ export interface IWeightInfo {
 // Mapping from shape to corresponding source type locations
 // TODO: Move this to its own type file? !!!
 export enum SourceProgramType {
-  DOMAIN,
-  SUBSTANCE,
-  STYLE,
+  DOMAIN = "DOM",
+  SUBSTANCE = "SUB",
+  STYLE = "STY",
 }
 
 // Types of entities we keep track of in source maps
 export enum SourceEntityType {
-  DOMTYPE,
-  DOMCONSTRUCTOR,
-  DOMFUNCTION,
-  DOMSUBTYPE,
-  DOMPREDICATE,
-  DOMPROP,
+  DOMTYPE = "DOMTYPE",
+  DOMCONSTRUCTOR = "DOMCONSTRUCTOR",
+  DOMFUNCTION = "DOMFUNCTION",
+  DOMSUBTYPE = "DOMSUBTYPE",
+  DOMPREDICATE = "DOMPREDICATE",
+  DOMPROP = "DOMPROP",
 
-  SUBOBJECT,
-  SUBPREDICATE,
-  SUBCONSTRUCTOR,
-  SUBFUNCTION,
-  SUBLABEL,
+  SUBOBJECT = "SUBOBJECT",
+  SUBPREDICATE = "SUBPREDICATE",
+  SUBCONSTRUCTOR = "SUBCONSTRUCTOR",
+  SUBFUNCTION = "SUBFUNCTION",
+  SUBLABEL = "SUBLABEL",
 
-  STYFUNCTION,
-  STYGPI,
-  STYSTRLIT,
-  STYNUMLIT,
-  STYNUMVAR,
-  STYBOOLIT,
-  STYVAR,
-  STYLOCAL,
-  STYLANG,
-  STYPROPERTY,
+  STYFUNCTION = "STYFUNCTION",
+  STYGPI = "STYGPI",
+  STYSTRLIT = "STYSTRLIT",
+  STYNUMLIT = "STYNUMLIT",
+  STYNUMVAR = "STYNUMVAR",
+  STYBOOLIT = "STYBOOLIT",
+  STYVAR = "STYVAR",
+  STYLOCAL = "STYLOCAL",
+  STYLANG = "STYLANG",
+  STYPROPERTY = "STYPROPERTY",
 }
 
 // Named and typed entity stored in a source map
@@ -234,6 +234,7 @@ export interface ISourceRef {
   lineEnd: number;
   colStart: number;
   colEnd: number;
+  srcText?: string[]; // Source text of the entity
 }
 
 /**
@@ -282,14 +283,24 @@ export class ShapeSourceMap {
       case SourceProgramType.SUBSTANCE: source = this.sub; break;
       case SourceProgramType.STYLE: source = this.sty; break;
     }
+    if(start && end) {
+      start.line = start.line - 1;
+      end.line = end.line - 1;
+      end.col = end.col + 1;
+    }
+
     const lines = source.split(/\r?\n/);
     const outLines: string[] = [];
-    for(let i = 0; i < lines.length; i++) {
+    const startLine = start ? start.line : 0;
+    const endLine = end ? end.line : lines.length-1;
+
+    for(let i = startLine; i < endLine+1; i++) {
+      console.log(`   - ${i}: ${lines[i]}`);
       if(start && end) {
         if(i >= start.line && i <= end.line) {
           if(start.line == end.line) {
             if(start.col <= end.col) {
-              outLines.push(lines[i].substring(start.col,end.col - start.col));
+              outLines.push(lines[i].substring(start.col,end.col));
             } else {
               outLines.push(lines[i].substring(start.col));
             }

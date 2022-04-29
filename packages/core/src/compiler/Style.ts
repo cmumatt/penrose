@@ -779,11 +779,16 @@ export const substituteRel = (
 // Applies a substitution to a list of relational statement theta([|S_r])
 // TODO: assumes a full substitution
 const substituteRels = (
-  subst: Subst,
-  rels: RelationPattern<A>[]
-): RelationPattern<A>[] => {
-  const res = rels.map((rel) => substituteRel(subst, rel));
-  return res;
+  subst: Subst, // one set of substitution variables
+  rels: RelationPattern<A>[] // many rels to check
+): RelationPatternSubst<A>[] => {
+  return rels.map((rel) => {
+    return {
+      subst: subst,
+      preRel: rel,
+      subRel: substituteRel(subst, rel),
+    };
+  });
 };
 
 //#endregion (subregion? TODO fix)
@@ -1363,20 +1368,24 @@ const relMatchesProg = (
   typeEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  rel: RelationPattern<A>,
-  styDebugBlock: BlockDebugInfo
+  rel: RelationPatternSubst<A>,
+  styDbgBlock: StyleDebugInfoBlock<A>
 ): boolean => {
-  console.log(`     - relMatchesProg: ${JSON.stringify(removeChildren(rel))}`); // !!!
-  if (rel.tag === "RelField") {
+  console.log(`     - relMatchesProg: ${JSON.stringify(pruneChildren(rel))}`); // !!!
+  if (rel.subRel.tag === "RelField") {
     // the current pattern matches on a Style field
-    const subName = rel.name.contents.value;
-    const fieldDesc = rel.fieldDescriptor;
+    const subName = rel.subRel.name.contents.value;
+    const fieldDesc = rel.subRel.fieldDescriptor;
     const label = subEnv.labels.get(subName);
     console.log(`       - subName   : ${subName}`); // !!!
-    console.log(`       - fieldDesc : ${JSON.stringify(removeChildren(fieldDesc))}`); // !!!
-    console.log(`       - label     : ${JSON.stringify(removeChildren(label))}`); // !!!
+    console.log(
+      `       - fieldDesc : ${JSON.stringify(pruneChildren(fieldDesc))}`
+    ); // !!!
+    console.log(`       - label     : ${JSON.stringify(pruneChildren(label))}`); // !!!
     if (label) {
-      console.log(`       - labelType : ${JSON.stringify(removeChildren(label.type))}`); // !!!
+      console.log(
+        `       - labelType : ${JSON.stringify(pruneChildren(label.type))}`
+      ); // !!!
       console.log(`       - labelValue: ${label.value}`); // !!!
       // check if the label type matches with the descriptor
       if (fieldDesc) {
@@ -1388,29 +1397,76 @@ const relMatchesProg = (
     }
   } else {
     const result = subProg.statements.some((line) => {
-      const result = relMatchesLine(typeEnv, subEnv, line, rel);
+      const result = relMatchesLine(typeEnv, subEnv, line, rel.subRel);
       //if(result) console.log(`     - relMatchLn: ${result} : ${JSON.stringify(removeChildren(line))}`); // !!!
-      return result;      
+      return result;
     });
-    if(result) {
-      
+    if (result) {
+      styDbgBlock.sats.push({ rel: rel, reasons: [] });
     } else {
-      console.log(`       - This rel FAILS due to this condition at ${rel["start"].line}:${rel["start"].col}-${rel["end"].line}:${rel["end"].col} NOT being true`); // !!!:
+      styDbgBlock.unsats.push({
+        rel: rel,
+        reasons: [
+          {
+            code: StyleUnsatReasons.NO_MATCHING_SUB_STATEMENTS,
+            src: [
+              mapTemplate(SourceProgramType.STYLE, rel.preRel, {
+                type: SourceEntityType.STYLANG,
+                name: "",
+              }),
+            ],
+          },
+        ],
+      });
     }
     return result;
   }
 };
 
+// Judgment 13. c |- [S] <| |S_r
+/*
+const relMatchesProgArr = (
+  typeEnv: Env,
+  subEnv: SubstanceEnv,
+  subProg: SubProg<A>,
+  rels: RelationPatternSubst<A>[]
+): boolean => {
+  return rels.every((rel) => relMatchesProg(typeEnv, subEnv, subProg, rel));
+};
+
+// Judgment 13. d |- [S] <| |S_r
+const relMatchesProgArrArr = (
+  typeEnv: Env,
+  subEnv: SubstanceEnv,
+  subProg: SubProg<A>,
+  rels: RelationPatternSubst<A>[][]
+): boolean => {
+  return rels.every((rels) => 
+    relMatchesProgArr(typeEnv, subEnv, subProg, rels)
+  );
+};
+*/
 // Judgment 15. b |- [S] <| [|S_r]
 const allRelsMatch = (
   typeEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  rels: RelationPattern<A>[],
-  styDbgBlock: BlockDebugInfo
+  rels: RelationPatternSubst<A>[],
+  styDbgBlock: StyleDebugInfoBlock<A>
 ): boolean => {
   //console.log('     --------------------------------'); // !!!
-  return rels.every((rel) => relMatchesProg(typeEnv, subEnv, subProg, rel, styDbgBlock));
+  return rels.every((rel) =>
+    relMatchesProg(typeEnv, subEnv, subProg, rel, styDbgBlock)
+  );
+};
+
+// A relation pattern in two forms:
+//  1. An original relation pattern with its original Style variables
+//  2. A substituted relation pattern with its substituted Substance variables
+type RelationPatternSubst<T> = {
+  subst: Subst; // The substitution that was applied to the pattern
+  preRel: RelationPattern<T>; // Original Relation Pattern
+  subRel: RelationPattern<T>; // Substituted Relation Pattern
 };
 
 // Judgment 17. b; [theta] |- [S] <| [|S_r] ~> [theta']
@@ -1421,7 +1477,7 @@ const filterRels = (
   subProg: SubProg<A>,
   rels: RelationPattern<A>[],
   substs: Subst[],
-  styDbgBlock: BlockDebugInfo,
+  styDbgBlock: StyleDebugInfoBlock<A>
 ): Subst[] => {
   const subProgFiltered: SubProg<A> = {
     ...subProg,
@@ -1432,7 +1488,13 @@ const filterRels = (
 
   return substs.filter((subst) => {
     console.log(`   - Testing: ${JSON.stringify(subst)}`); // !!!
-    return allRelsMatch(typeEnv, subEnv, subProgFiltered, substituteRels(subst, rels), styDbgBlock)
+    return allRelsMatch(
+      typeEnv,
+      subEnv,
+      subProgFiltered,
+      substituteRels(subst, rels),
+      styDbgBlock
+    );
   });
 };
 
@@ -1564,7 +1626,7 @@ const findSubstsSel = (
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
   [header, selEnv]: [Header<A>, SelEnv],
-  styDbg: StyleDebugInfo,
+  styDbg: StyleDebugInfo<A>
 ): Subst[] => {
   switch (header.tag) {
     case "Selector": {
@@ -1578,15 +1640,23 @@ const findSubstsSel = (
       );
 
       // !!!
-      const styDbgBlock: BlockDebugInfo = {
+      const styDbgBlock: StyleDebugInfoBlock<A> = {
         sel: sel,
         sats: [],
         unsats: [],
-      }
+      };
       styDbg.blocks.push(styDbgBlock);
-      console.log(`Block is: ${JSON.stringify(removeChildren({head:header,where:header.where}))}`); // !!!
-      console.log(` - rawSubsts:       ${JSON.stringify(removeChildren(rawSubsts))}`); // !!!
-      console.log(` - substCandidates: ${JSON.stringify(removeChildren(substCandidates))}`); // !!!
+      console.log(
+        `Block is: ${JSON.stringify(
+          pruneChildren({ head: header, where: header.where })
+        )}`
+      ); // !!!
+      console.log(
+        ` - rawSubsts:       ${JSON.stringify(pruneChildren(rawSubsts))}`
+      ); // !!!
+      console.log(
+        ` - substCandidates: ${JSON.stringify(pruneChildren(substCandidates))}`
+      ); // !!!
       const filteredSubsts = filterRels(
         varEnv,
         subEnv,
@@ -1596,8 +1666,12 @@ const findSubstsSel = (
         styDbgBlock
       );
       const correctSubsts = filteredSubsts.filter(uniqueKeysAndVals);
-      console.log(` - filteredSubsts:  ${JSON.stringify(removeChildren(filteredSubsts))}`); // !!!
-      console.log(` - correctSubsts:   ${JSON.stringify(removeChildren(correctSubsts))}`); // !!!
+      console.log(
+        ` - filteredSubsts:  ${JSON.stringify(pruneChildren(filteredSubsts))}`
+      ); // !!!
+      console.log(
+        ` - correctSubsts:   ${JSON.stringify(pruneChildren(correctSubsts))}`
+      ); // !!!
       return correctSubsts;
     }
     case "Namespace": {
@@ -2098,7 +2172,7 @@ const translatePair = (
   trans: Translation,
   hb: HeaderBlock<A>,
   blockNum: number,
-  styDbg: StyleDebugInfo,
+  styDbg: StyleDebugInfo<A>
 ): Either<StyleErrors, Translation> => {
   switch (hb.header.tag) {
     case "Namespace": {
@@ -2142,10 +2216,13 @@ const translatePair = (
       }
 
       // For creating unique local var names
-      const substs = findSubstsSel(varEnv, subEnv, subProg, [
-        hb.header,
-        selEnv,
-      ], styDbg);
+      const substs = findSubstsSel(
+        varEnv,
+        subEnv,
+        subProg,
+        [hb.header, selEnv],
+        styDbg
+      );
       log.debug("Translating block", hb, "with substitutions", substs);
       return translateSubstsBlock(trans, numbered(substs), [
         hb.block,
@@ -2227,13 +2304,14 @@ const translateStyProg = (
   labelMap: LabelMap,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   styVals: number[],
-  styDbg: StyleDebugInfo, // !!!
+  styDbg: StyleDebugInfo<A> // !!!
 ): Either<StyleErrors, Translation> => {
   // COMBAK: Deal with styVals
 
   const res = foldM(
     styProg.blocks,
-    (trans, hb, i) => translatePair(varEnv, subEnv, subProg, trans, hb, i, styDbg),
+    (trans, hb, i) =>
+      translatePair(varEnv, subEnv, subProg, trans, hb, i, styDbg),
     initTrans()
   );
 
@@ -3079,9 +3157,9 @@ const genState = (
 
   const uninitializedPaths = findUninitialized(trans);
   const shapePathList: [string, string][] = findShapeNames(trans);
-  console.log(`Shapes: ${JSON.stringify(removeChildren(shapePathList))}`); // !!!
+  console.log(`Shapes: ${JSON.stringify(pruneChildren(shapePathList))}`); // !!!
   const shapePaths = shapePathList.map(mkPath);
-  console.log(`ShapePaths: ${JSON.stringify(removeChildren(shapePaths))}`); // !!!
+  console.log(`ShapePaths: ${JSON.stringify(pruneChildren(shapePaths))}`); // !!!
 
   const canvasErrs = checkCanvas(trans);
   if (canvasErrs.length > 0) {
@@ -3438,11 +3516,11 @@ export const compileStyle = (
     return err(toStyleErrors(selErrs));
   }
 
-  log.info("selEnvs", JSON.stringify(removeChildren(selEnvs)));
+  log.info("selEnvs", JSON.stringify(pruneChildren(selEnvs)));
 
   // Translate style program
   const styVals: number[] = []; // COMBAK: Deal with style values when we have plugins
-  const styDebugInfo: StyleDebugInfo = {
+  const styDbg: StyleDebugInfo<A> = {
     blocks: [],
   };
   console.log("Translating style program...."); //!!!
@@ -3453,10 +3531,10 @@ export const compileStyle = (
     styProg,
     labelMap,
     styVals,
-    styDebugInfo, // !!!
+    styDbg // !!!
   );
   console.log("Done Translating style program...."); //!!!
-  console.log(`Translation: ${JSON.stringify(removeChildren(translateRes))}`); //!!!")
+  console.log(`Translation: ${JSON.stringify(pruneChildren(translateRes))}`); //!!!")
 
   // Map objects to original program statements
   // TODO: Thids is not the right place for this. !!!
@@ -3470,6 +3548,24 @@ export const compileStyle = (
     stySource
   );
   console.log("Done Building source map...."); //!!!
+  console.log("Resolving source lines for unsats..."); //!!!
+  styDbg.blocks.forEach((block) => {
+    block.unsats.forEach((unsat) => {
+      unsat.reasons.forEach((reason) => {
+        reason.src.forEach((srcRef) => {
+          srcRef.srcText = shapeSourceMap.getSource(srcRef.origin,{line: srcRef.lineStart, col: srcRef.colStart },{line: srcRef.lineEnd, col: srcRef.colEnd });
+        });
+      });
+    });
+  });
+  console.log("Done Resolving source lines for unsats..."); //!!!
+  console.log(
+    `Debug info: ${JSON.stringify(
+      pruneSubNodes(styDbg, ["children", "where"])
+    )}`
+  ); //!!!")
+
+
   log.info("translation (before genOptProblem)", translateRes);
 
   // Translation failed somewhere
@@ -3503,18 +3599,34 @@ export const compileStyle = (
 };
 
 // !!!
-type StyleDebugInfo = {
-  blocks: BlockDebugInfo[]
-
+/*
+export class StyleDebugger<T> {
+  private blocks: StyleDebugInfoBlock<T>[] = [];
+  public addBlock(block: StyleDebugInfoBlock<T>) {
+    this.blocks.push({...block});
+  }
+  public get
+}
+*/
+type StyleDebugInfo<T> = {
+  blocks: StyleDebugInfoBlock<T>[];
 };
-type BlockDebugInfo = {
+type StyleDebugInfoBlock<T> = {
   sel: Selector<unknown>;
-  sats: VarMapDebugInfo[];
-  unsats: VarMapDebugInfo[];
+  sats: StyleDebugInfoRel<T>[];
+  unsats: StyleDebugInfoRel<T>[];
 };
-type VarMapDebugInfo = {
-  vars: { [subVar: string]: string };
-  reasons: [];
+type StyleDebugInfoRel<T> = {
+  rel: RelationPatternSubst<T>;
+  reasons: StyleDebugInfoReason[];
+};
+type StyleDebugInfoReason = {
+  code: StyleUnsatReasons;
+  src: ISourceRef[];
+  text?: string[];
+};
+enum StyleUnsatReasons {
+  NO_MATCHING_SUB_STATEMENTS = "NO_MATCHING_SUB_STATEMENTS",
 }
 
 // Mapping rule Registry
@@ -3606,10 +3718,10 @@ const mapShapesToSource = (
   subProg: SubProg<unknown>,
   subSrc: string,
   styProg: StyProg<unknown>,
-  stySrc: string,
+  stySrc: string
 ): ShapeSourceMap => {
   // Create the source map
-  const sourceMap: ShapeSourceMap = new ShapeSourceMap(domSrc,subSrc,stySrc);
+  const sourceMap: ShapeSourceMap = new ShapeSourceMap(domSrc, subSrc, stySrc);
 
   // ------------------------------------------------------------------------
   // Style: resolve GPIs to rules and Substance objects
@@ -3996,7 +4108,10 @@ const mapAstNodesToSource = (
       const name: string = mapEntityName(node, map[node.tag].map);
       if (name !== "") {
         sourceMap.add(
-          mapTemplate(pgmType, node, { type: map[node.tag].type, name: name } as ISourceMapEntity)
+          mapTemplate(pgmType, node, {
+            type: map[node.tag].type,
+            name: name,
+          } as ISourceMapEntity)
         );
       }
     } else {
@@ -4008,7 +4123,8 @@ const mapAstNodesToSource = (
 };
 
 /**
- * Helper function to generate a source map refernece
+ * Helper function to generate a source map refernece from an AST Node
+ * 
  * @param origin Source Program Type (e.g., Style, Substance, Domain)
  * @param node AST Node to Process
  * @param entity Entity name and type
@@ -4035,23 +4151,32 @@ const mapTemplate = (
   };
 };
 
-const removeChildren = ( node: any ) : any => {
+/**
+ * Removes subnodes from a tree based on key name.
+ *
+ * @param node Tree from which to remove keys
+ * @param dels Array of string/key values to prune
+ * @returns Tree w/desired keys pruned
+ */
+const pruneSubNodes = (node: any, dels: string[]) => {
+  const dict = Object.assign({}, ...dels.map((key) => ({ [key]: true })));
+  return pruneSubNodesDict(node, dict);
+};
+const pruneSubNodesDict = (node: any, dels: { [k: string]: boolean }) => {
   // Array - process each element and return it
-  if(Array.isArray(node)) {
-    const newNode:unknown[] = [];
-    node.forEach( (subNode) => 
-      newNode.push(removeChildren(subNode))
-    );
+  if (Array.isArray(node)) {
+    const newNode: unknown[] = [];
+    node.forEach((subNode) => newNode.push(pruneSubNodesDict(subNode, dels)));
     return newNode;
-  };
+  }
 
-  // Object - except children, process each element and return it
-  if(node instanceof Object) {
+  // Object - except dels, process each element and return it
+  if (node instanceof Object) {
     const newNode = {};
     let k: keyof typeof node;
-    for(k in node) {
-      if(k !== "children") {
-        newNode[k] = removeChildren(node[k]);
+    for (k in node) {
+      if (!(k.valueOf() in dels)) {
+        newNode[k] = pruneSubNodesDict(node[k], dels);
       }
     }
     return newNode;
@@ -4059,5 +4184,8 @@ const removeChildren = ( node: any ) : any => {
 
   // Base case - return value unchanged
   return node;
+};
 
-}
+const pruneChildren = (node: any): any => {
+  return pruneSubNodesDict(node, { children: true });
+};
