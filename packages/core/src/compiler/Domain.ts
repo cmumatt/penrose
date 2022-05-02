@@ -41,6 +41,7 @@ import {
   safeChain,
   typeNotFound,
 } from "utils/Error";
+import { Debugger } from "./Debugger";
 
 export const parseDomain = (
   prog: string
@@ -68,11 +69,18 @@ export const parseDomain = (
  */
 export const compileDomain = (prog: string): Result<Env, PenroseError> => {
   const astOk = parseDomain(prog);
+
   if (astOk.isOk()) {
     const ast = astOk.value;
+
+    // Load the Domain source and AST into the debugger
+    const dbg = Debugger.getInstance();
+    dbg.setDomAst(astOk.value);
+    dbg.setDomSrc(prog);
+
     return checkDomain(ast).match({
       Ok: (env) => {
-        env["ast"] = ast;
+        env["ast"] = ast;        
         return ok(env);
       },
       Err: (e) => err({ ...e, errorType: "DomainError" }),

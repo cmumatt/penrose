@@ -32,14 +32,9 @@ import seedrandom from "seedrandom";
 import { Canvas } from "shapes/Samplers";
 import { ShapeDef, shapedefs } from "shapes/Shapes";
 import { VarAD } from "types/ad";
-import { A, ASTNode, C, Identifier } from "types/ast";
+import { A, C, Identifier } from "types/ast";
 import { Either, Left, Right } from "types/common";
-import {
-  ConstructorDecl,
-  DomainProg,
-  Env,
-  TypeConstructor,
-} from "types/domain";
+import { ConstructorDecl, Env, TypeConstructor } from "types/domain";
 import {
   ParseError,
   PenroseError,
@@ -51,11 +46,8 @@ import {
 } from "types/errors";
 import {
   Fn,
-  ISourceMapEntity,
-  ISourceRef,
   OptType,
   Params,
-  ShapeSourceMap,
   SourceEntityType,
   SourceProgramType,
   State,
@@ -77,6 +69,7 @@ import {
   PredArg,
   PropertyDecl,
   RelationPattern,
+  RelationPatternSubst,
   RelBind,
   RelField,
   RelPred,
@@ -131,6 +124,12 @@ import {
   zip2,
 } from "utils/Util";
 import { checkTypeConstructor, isDeclaredSubtype } from "./Domain";
+import {
+  mapTemplate,
+  Debugger,
+  DebugReasonCodes,
+  DebugStyleBlock,
+} from "./Debugger";
 
 const log = consola
   .create({ level: LogLevel.Info })
@@ -1369,7 +1368,7 @@ const relMatchesProg = (
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
   rel: RelationPatternSubst<A>,
-  styDbgBlock: StyleDebugInfoBlock<A>
+  dbgStyBlock: DebugStyleBlock<A>
 ): boolean => {
   console.log(`     - relMatchesProg: ${JSON.stringify(pruneChildren(rel))}`); // !!!
   if (rel.subRel.tag === "RelField") {
@@ -1377,16 +1376,7 @@ const relMatchesProg = (
     const subName = rel.subRel.name.contents.value;
     const fieldDesc = rel.subRel.fieldDescriptor;
     const label = subEnv.labels.get(subName);
-    console.log(`       - subName   : ${subName}`); // !!!
-    console.log(
-      `       - fieldDesc : ${JSON.stringify(pruneChildren(fieldDesc))}`
-    ); // !!!
-    console.log(`       - label     : ${JSON.stringify(pruneChildren(label))}`); // !!!
     if (label) {
-      console.log(
-        `       - labelType : ${JSON.stringify(pruneChildren(label.type))}`
-      ); // !!!
-      console.log(`       - labelValue: ${label.value}`); // !!!
       // check if the label type matches with the descriptor
       if (fieldDesc) {
         // NOTE: empty labels have a specific `NoLabel` type, so even if the entry exists, no existing field descriptors will match on it.
@@ -1401,24 +1391,24 @@ const relMatchesProg = (
       //if(result) console.log(`     - relMatchLn: ${result} : ${JSON.stringify(removeChildren(line))}`); // !!!
       return result;
     });
-    if (result) {
-      styDbgBlock.sats.push({ rel: rel, reasons: [] });
-    } else {
-      styDbgBlock.unsats.push({
-        rel: rel,
-        reasons: [
-          {
-            code: StyleUnsatReasons.NO_MATCHING_SUB_STATEMENTS,
-            src: [
-              mapTemplate(SourceProgramType.STYLE, rel.preRel, {
-                type: SourceEntityType.STYLANG,
-                name: "",
-              }),
-            ],
-          },
-        ],
-      });
-    }
+
+    // Record the match result so the debugger may query it later
+    (result ? dbgStyBlock.sats : dbgStyBlock.unsats).push({
+      rel: rel,
+      reasons: [
+        {
+          code: result
+            ? DebugReasonCodes.MATCHING_SUB_STATEMENTS_FOUND
+            : DebugReasonCodes.NO_MATCHING_SUB_STATEMENTS,
+          srcRef: [
+            mapTemplate(SourceProgramType.STYLE, rel.preRel, {
+              type: SourceEntityType.STYLANG,
+              name: "",
+            }),
+          ],
+        },
+      ],
+    });
     return result;
   }
 };
@@ -1452,21 +1442,12 @@ const allRelsMatch = (
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
   rels: RelationPatternSubst<A>[],
-  styDbgBlock: StyleDebugInfoBlock<A>
+  dbgStyBlock: DebugStyleBlock<A>
 ): boolean => {
   //console.log('     --------------------------------'); // !!!
   return rels.every((rel) =>
-    relMatchesProg(typeEnv, subEnv, subProg, rel, styDbgBlock)
+    relMatchesProg(typeEnv, subEnv, subProg, rel, dbgStyBlock)
   );
-};
-
-// A relation pattern in two forms:
-//  1. An original relation pattern with its original Style variables
-//  2. A substituted relation pattern with its substituted Substance variables
-type RelationPatternSubst<T> = {
-  subst: Subst; // The substitution that was applied to the pattern
-  preRel: RelationPattern<T>; // Original Relation Pattern
-  subRel: RelationPattern<T>; // Substituted Relation Pattern
 };
 
 // Judgment 17. b; [theta] |- [S] <| [|S_r] ~> [theta']
@@ -1477,7 +1458,7 @@ const filterRels = (
   subProg: SubProg<A>,
   rels: RelationPattern<A>[],
   substs: Subst[],
-  styDbgBlock: StyleDebugInfoBlock<A>
+  dbgStyBlock: DebugStyleBlock<A>
 ): Subst[] => {
   const subProgFiltered: SubProg<A> = {
     ...subProg,
@@ -1493,7 +1474,7 @@ const filterRels = (
       subEnv,
       subProgFiltered,
       substituteRels(subst, rels),
-      styDbgBlock
+      dbgStyBlock
     );
   });
 };
@@ -1625,8 +1606,7 @@ const findSubstsSel = (
   varEnv: Env,
   subEnv: SubstanceEnv,
   subProg: SubProg<A>,
-  [header, selEnv]: [Header<A>, SelEnv],
-  styDbg: StyleDebugInfo<A>
+  [header, selEnv]: [Header<A>, SelEnv]
 ): Subst[] => {
   switch (header.tag) {
     case "Selector": {
@@ -1640,12 +1620,11 @@ const findSubstsSel = (
       );
 
       // !!!
-      const styDbgBlock: StyleDebugInfoBlock<A> = {
+      const dbgStyBlock: DebugStyleBlock<A> = {
         sel: sel,
         sats: [],
         unsats: [],
       };
-      styDbg.blocks.push(styDbgBlock);
       console.log(
         `Block is: ${JSON.stringify(
           pruneChildren({ head: header, where: header.where })
@@ -1663,8 +1642,9 @@ const findSubstsSel = (
         subProg,
         rels,
         substCandidates,
-        styDbgBlock
+        dbgStyBlock
       );
+      Debugger.getInstance().addBlock(dbgStyBlock);
       const correctSubsts = filteredSubsts.filter(uniqueKeysAndVals);
       console.log(
         ` - filteredSubsts:  ${JSON.stringify(pruneChildren(filteredSubsts))}`
@@ -2171,8 +2151,7 @@ const translatePair = (
   subProg: SubProg<A>,
   trans: Translation,
   hb: HeaderBlock<A>,
-  blockNum: number,
-  styDbg: StyleDebugInfo<A>
+  blockNum: number
 ): Either<StyleErrors, Translation> => {
   switch (hb.header.tag) {
     case "Namespace": {
@@ -2216,13 +2195,10 @@ const translatePair = (
       }
 
       // For creating unique local var names
-      const substs = findSubstsSel(
-        varEnv,
-        subEnv,
-        subProg,
-        [hb.header, selEnv],
-        styDbg
-      );
+      const substs = findSubstsSel(varEnv, subEnv, subProg, [
+        hb.header,
+        selEnv,
+      ]);
       log.debug("Translating block", hb, "with substitutions", substs);
       return translateSubstsBlock(trans, numbered(substs), [
         hb.block,
@@ -2303,15 +2279,13 @@ const translateStyProg = (
   styProg: StyProg<A>,
   labelMap: LabelMap,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  styVals: number[],
-  styDbg: StyleDebugInfo<A> // !!!
+  styVals: number[]
 ): Either<StyleErrors, Translation> => {
   // COMBAK: Deal with styVals
 
   const res = foldM(
     styProg.blocks,
-    (trans, hb, i) =>
-      translatePair(varEnv, subEnv, subProg, trans, hb, i, styDbg),
+    (trans, hb, i) => translatePair(varEnv, subEnv, subProg, trans, hb, i),
     initTrans()
   );
 
@@ -3138,8 +3112,7 @@ const isVaryingInitPath = <T>(
 // COMBAK: Add optConfig as param?
 const genState = (
   variation: string,
-  trans: Translation,
-  shapeSourceMap: ShapeSourceMap
+  trans: Translation
 ): Result<State, StyleErrors> => {
   const { rng, seeds } = variationSeeds(variation);
 
@@ -3210,7 +3183,6 @@ const genState = (
     seeds,
 
     shapes: initialGPIs, // These start out empty because they are initialized in the frontend via `evalShapes` in the Evaluator
-    shapeSourceMap: shapeSourceMap, // map of shapes to source lines
     shapePaths,
     shapeProperties,
     shapeOrdering,
@@ -3503,6 +3475,11 @@ export const compileStyle = (
   log.info("old prog", styProgInit);
   log.info("new prog, with named anon statements", styProg);
 
+  // Load the Style source and AST into the debugger
+  const dbg = Debugger.getInstance();
+  dbg.setStyAst(styProg);
+  dbg.setStySrc(stySource);
+
   // Check selectors; return list of selector environments (`checkSels`)
   const selEnvs = checkSelsAndMakeEnv(varEnv, styProg.blocks);
 
@@ -3520,9 +3497,6 @@ export const compileStyle = (
 
   // Translate style program
   const styVals: number[] = []; // COMBAK: Deal with style values when we have plugins
-  const styDbg: StyleDebugInfo<A> = {
-    blocks: [],
-  };
   console.log("Translating style program...."); //!!!
   const translateRes = translateStyProg(
     varEnv,
@@ -3530,41 +3504,10 @@ export const compileStyle = (
     subProg,
     styProg,
     labelMap,
-    styVals,
-    styDbg // !!!
+    styVals
   );
   console.log("Done Translating style program...."); //!!!
   console.log(`Translation: ${JSON.stringify(pruneChildren(translateRes))}`); //!!!")
-
-  // Map objects to original program statements
-  // TODO: Thids is not the right place for this. !!!
-  console.log("Building source map...."); //!!!
-  const shapeSourceMap: ShapeSourceMap = mapShapesToSource(
-    varEnv.ast as DomainProg<unknown>,
-    "", // !!! Should be domain program source  - fix when moved out of compileStyle()
-    subProg,
-    "", // !!! Should be Substance program source - fix when moved out of compileStyle()
-    styProg,
-    stySource
-  );
-  console.log("Done Building source map...."); //!!!
-  console.log("Resolving source lines for unsats..."); //!!!
-  styDbg.blocks.forEach((block) => {
-    block.unsats.forEach((unsat) => {
-      unsat.reasons.forEach((reason) => {
-        reason.src.forEach((srcRef) => {
-          srcRef.srcText = shapeSourceMap.getSource(srcRef.origin,{line: srcRef.lineStart, col: srcRef.colStart },{line: srcRef.lineEnd, col: srcRef.colEnd });
-        });
-      });
-    });
-  });
-  console.log("Done Resolving source lines for unsats..."); //!!!
-  console.log(
-    `Debug info: ${JSON.stringify(
-      pruneSubNodes(styDbg, ["children", "where"])
-    )}`
-  ); //!!!")
-
 
   log.info("translation (before genOptProblem)", translateRes);
 
@@ -3583,11 +3526,7 @@ export const compileStyle = (
 
   // TODO(errors): `findExprsSafe` shouldn't fail (as used in `genOptProblemAndState`, since all the paths are generated from the translation) but could always be safer...
   console.log("Calling genState..."); //!!!
-  const initState: Result<State, StyleErrors> = genState(
-    variation,
-    trans,
-    shapeSourceMap
-  );
+  const initState: Result<State, StyleErrors> = genState(variation, trans);
   console.log("Done Calling genState..."); //!!!
   log.info("init state from GenOptProblem", initState);
 
@@ -3598,559 +3537,7 @@ export const compileStyle = (
   return ok(initState.value);
 };
 
-// !!!
-/*
-export class StyleDebugger<T> {
-  private blocks: StyleDebugInfoBlock<T>[] = [];
-  public addBlock(block: StyleDebugInfoBlock<T>) {
-    this.blocks.push({...block});
-  }
-  public get
-}
-*/
-type StyleDebugInfo<T> = {
-  blocks: StyleDebugInfoBlock<T>[];
-};
-type StyleDebugInfoBlock<T> = {
-  sel: Selector<unknown>;
-  sats: StyleDebugInfoRel<T>[];
-  unsats: StyleDebugInfoRel<T>[];
-};
-type StyleDebugInfoRel<T> = {
-  rel: RelationPatternSubst<T>;
-  reasons: StyleDebugInfoReason[];
-};
-type StyleDebugInfoReason = {
-  code: StyleUnsatReasons;
-  src: ISourceRef[];
-  text?: string[];
-};
-enum StyleUnsatReasons {
-  NO_MATCHING_SUB_STATEMENTS = "NO_MATCHING_SUB_STATEMENTS",
-}
-
-// Mapping rule Registry
-enum NameMapRules {
-  SKIP,
-  OP,
-  VALUE,
-  CONTENTS,
-  CONTENTS_VALUE,
-  TYPE_VALUE,
-  TYPE_NAME_VALUE,
-  NAME_VALUE,
-  NAME_CONTENTS_VALUE,
-  HEADER_CONTENTS_CONTENTS_VALUE,
-  VARIABLE_VALUE,
-  PROPERTY_PATH,
-  FIELD_PATH,
-  TAG,
-}
-
-// Structure for declaring rules that map AST nodes to Source Mappings
-type AstSourceMap = {
-  [k: string]: { map: NameMapRules; type?: SourceEntityType; subs: string[][] };
-};
-
-/**
- *
- * @param node  The AST Node to name
- * @param rule  Rule to apply to the node to extract its name
- * @returns
- */
-const mapEntityName = (node: ASTNode<unknown>, rule: NameMapRules): string => {
-  switch (rule) {
-    case NameMapRules.SKIP:
-      return "";
-    case NameMapRules.OP:
-      return node["op"];
-    case NameMapRules.TAG:
-      return node["tag"];
-    case NameMapRules.VALUE:
-      return node["value"];
-    case NameMapRules.CONTENTS:
-      return node["contents"];
-    case NameMapRules.CONTENTS_VALUE:
-      return node["contents"]["value"];
-    case NameMapRules.TYPE_VALUE:
-      return node["type"]["value"];
-    case NameMapRules.TYPE_NAME_VALUE:
-      return node["type"]["name"]["value"];
-    case NameMapRules.NAME_VALUE:
-      return node["name"]["value"];
-    case NameMapRules.NAME_CONTENTS_VALUE:
-      return node["name"]["contents"]["value"];
-    case NameMapRules.HEADER_CONTENTS_CONTENTS_VALUE:
-      return node["contents"]["contents"]["value"];
-    case NameMapRules.VARIABLE_VALUE:
-      return node["variable"]["value"];
-    case NameMapRules.PROPERTY_PATH:
-      return (
-        node["name"]["contents"]["value"] +
-        "." +
-        node["field"]["value"] +
-        "." +
-        node["property"]["value"]
-      );
-    case NameMapRules.FIELD_PATH:
-      return node["name"]["contents"]["value"] + "." + node["field"]["value"];
-    default:
-      throw new Error(`Unhandled mapEntityName type: ${rule}`);
-  }
-};
-
-/**
- * Map shapes to their original source code
- *
- * TODO: The style piece should probably be here, but not the other parts.  !!!
- *
- * @param domProg
- * @param domSrc
- * @param subProg
- * @param subSrc
- * @param styProg
- * @param stySrc
- * @returns ShapeSourceMap
- */
-const mapShapesToSource = (
-  domProg: DomainProg<unknown>,
-  domSrc: string,
-  subProg: SubProg<unknown>,
-  subSrc: string,
-  styProg: StyProg<unknown>,
-  stySrc: string
-): ShapeSourceMap => {
-  // Create the source map
-  const sourceMap: ShapeSourceMap = new ShapeSourceMap(domSrc, subSrc, stySrc);
-
-  // ------------------------------------------------------------------------
-  // Style: resolve GPIs to rules and Substance objects
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to Style AST data for outputting Source Map
-  const styAstMap: AstSourceMap = {
-    StyProg: {
-      map: NameMapRules.SKIP,
-      subs: [["blocks"]],
-    },
-    HeaderBlock: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["header"], ["block", "statements"]],
-    },
-    PathAssign: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["path"], ["value"]],
-    },
-    Selector: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["head"], ["where"]],
-    },
-    DeclPatterns: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    DeclPattern: {
-      map: NameMapRules.TYPE_VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [["id"]],
-    },
-    StyVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.STYVAR,
-      subs: [],
-    },
-    LocalVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.STYLOCAL,
-      subs: [],
-    },
-    RelationPatterns: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    RelPred: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMPREDICATE, // !!! Always a predicate?
-      subs: [["args"]],
-    },
-    SEBind: {
-      map: NameMapRules.SKIP,
-      subs: [["contents"]],
-    },
-    Fix: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYNUMLIT,
-      subs: [],
-    },
-    StringLit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYSTRLIT,
-      subs: [],
-    },
-    InternalLocalVar: {
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    ObjFn: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    ConstrFn: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    FieldPath: {
-      map: NameMapRules.FIELD_PATH,
-      type: SourceEntityType.STYLANG,
-      subs: [],
-    },
-    GPIDecl: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["shapeName"], ["properties"]],
-    },
-    Namespace: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Layering: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["above"], ["below"]],
-    },
-    BinOp: {
-      map: NameMapRules.OP,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["left"], ["right"]],
-    },
-    PropertyDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYPROPERTY,
-      subs: [["value"]],
-    },
-    PropertyPath: {
-      map: NameMapRules.PROPERTY_PATH,
-      type: SourceEntityType.STYPROPERTY,
-      subs: [],
-    },
-    Vector: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    CompApp: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.STYVAR,
-      subs: [],
-    },
-    AccessPath: {
-      // Not Yet Implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    BoolLit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYBOOLIT,
-      subs: [],
-    },
-    Override: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["path"], ["value"]],
-    },
-    SubVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    Delete: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Tuple: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    List: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Vary: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYNUMVAR,
-      subs: [],
-    },
-    VaryInit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYNUMVAR,
-      subs: [],
-    },
-    UOp: {
-      map: NameMapRules.OP,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["arg"]],
-    },
-    RelBind: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["id"], ["expr"]],
-    },
-    SEFuncOrValCons: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYVAR, // Not sure this is right
-      subs: [["args"]],
-    },
-  };
-  mapAstNodesToSource(styProg, styAstMap, SourceProgramType.STYLE, sourceMap);
-
-  // ------------------------------------------------------------------------
-  // Substance: resolve Substance objects to types and predicates
-  //            TODO: Should probably be done in Substance compiler !!!
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to AST data for outputting Source Map
-  const subAstMap: AstSourceMap = {
-    SubProg: {
-      map: NameMapRules.SKIP,
-      subs: [["statements"]],
-    },
-    Decl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    ApplyPredicate: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBPREDICATE,
-      subs: [["args"]],
-    },
-    Func: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBFUNCTION,
-      subs: [["args"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    AutoLabel: {
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    LabelDecl: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.SUBLABEL,
-      subs: [["variable"]],
-    },
-    Bind: {
-      map: NameMapRules.VARIABLE_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [["expr"]],
-    },
-    ApplyConstructor: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBCONSTRUCTOR,
-      subs: [["args"]],
-    },
-    ApplyFunction: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBFUNCTION,
-      subs: [["args"]],
-    },
-  };
-  mapAstNodesToSource(
-    subProg,
-    subAstMap,
-    SourceProgramType.SUBSTANCE,
-    sourceMap
-  );
-
-  // ------------------------------------------------------------------------
-  // Domain: Resolve predicates, functions, etc. to source locations
-  //         TODO: Should probably be done in Domain compiler !!!
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to AST data for outputting Source Map
-  const domAstMap: AstSourceMap = {
-    DomainProg: {
-      map: NameMapRules.SKIP,
-      subs: [["statements"]],
-    },
-    TypeDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [["params"], ["supertypes"]],
-    },
-    FunctionDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMFUNCTION,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    ConstructorDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMCONSTRUCTOR,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    PredicateDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMPREDICATE,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    Arg: {
-      map: NameMapRules.SKIP,
-      subs: [["variable"], ["type"]],
-    },
-    TypeConstructor: {
-      map: NameMapRules.SKIP,
-      subs: [["name"], ["args"]],
-    },
-    TypeVar: {
-      map: NameMapRules.SKIP,
-      subs: [["name"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [],
-    },
-    Prop: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.DOMPROP,
-      subs: [],
-    },
-    SubTypeDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    PreludeDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    NotationDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-  };
-  mapAstNodesToSource(domProg, domAstMap, SourceProgramType.DOMAIN, sourceMap);
-
-  return sourceMap;
-};
-
-/**
- * Map shapes to their original source code
- *
- * TODO: The style piece should probably be here, but not the other parts.  !!!
- *
- * @param ast AST to map to source statements
- * @param map Map of AST nodes to their original source code
- * @param pgmType Source Program Type (Style, Substance, Domain)
- * @param sourceMap
- * @returns ShapeSourceMap
- */
-const mapAstNodesToSource = (
-  ast: ASTNode<unknown>,
-  map: AstSourceMap,
-  pgmType: SourceProgramType,
-  sourceMap: ShapeSourceMap
-): ShapeSourceMap => {
-  // Initially fill the stack with the list of AST block nodes
-  const nodeStack: ASTNode<unknown>[] = [ast];
-  while (nodeStack.length > 0) {
-    // Pop item off the stack
-    const node = nodeStack.pop() as ASTNode<unknown>;
-    //console.log(`Processing AST node: ${node.tag}`);
-
-    // Add any subnodes in this node to the stack for subsequent processing
-    if (node.tag in map && "subs" in map[node.tag]) {
-      map[node.tag].subs.forEach((sub: string[]) => {
-        let nodesToAdd;
-        switch (sub.length) {
-          case 1:
-            nodesToAdd = node[sub[0]];
-            break;
-          case 2:
-            nodesToAdd = node[sub[0]][sub[1]];
-            break;
-          case 3:
-            nodesToAdd = node[sub[0]][sub[1]][sub[2]];
-            break;
-          case 4:
-            nodesToAdd = node[sub[0]][sub[1]][sub[2]][sub[3]];
-            break;
-          default:
-            throw new Error(`Invalid sub node length: ${sub.length}`);
-        }
-        if (nodesToAdd !== undefined) {
-          Array.isArray(nodesToAdd)
-            ? nodeStack.push(...nodesToAdd.reverse())
-            : nodeStack.push(nodesToAdd);
-        }
-      });
-
-      // Map the node into the source map -- if needed
-      const name: string = mapEntityName(node, map[node.tag].map);
-      if (name !== "") {
-        sourceMap.add(
-          mapTemplate(pgmType, node, {
-            type: map[node.tag].type,
-            name: name,
-          } as ISourceMapEntity)
-        );
-      }
-    } else {
-      console.log(` - Skipping unknown node: ${node.tag}`); // !!!
-    }
-  }
-
-  return sourceMap;
-};
-
-/**
- * Helper function to generate a source map refernece from an AST Node
- * 
- * @param origin Source Program Type (e.g., Style, Substance, Domain)
- * @param node AST Node to Process
- * @param entity Entity name and type
- * @returns ISourceRef
- */
-const mapTemplate = (
-  origin: SourceProgramType,
-  node: ASTNode<unknown>,
-  entity: ISourceMapEntity
-): ISourceRef => {
-  if (!("start" in node)) {
-    node["start"] = { line: 0, col: 0 };
-  }
-  if (!("end" in node)) {
-    node["end"] = { line: 0, col: 0 };
-  }
-  return {
-    entity: entity,
-    origin: origin,
-    lineStart: node["start"].line,
-    lineEnd: node["end"].line,
-    colStart: node["start"].col,
-    colEnd: node["end"].col,
-  };
-};
-
+// !!! These should not be here
 /**
  * Removes subnodes from a tree based on key name.
  *
@@ -4158,7 +3545,7 @@ const mapTemplate = (
  * @param dels Array of string/key values to prune
  * @returns Tree w/desired keys pruned
  */
-const pruneSubNodes = (node: any, dels: string[]) => {
+export const pruneSubNodes = (node: any, dels: string[]):any => {
   const dict = Object.assign({}, ...dels.map((key) => ({ [key]: true })));
   return pruneSubNodesDict(node, dict);
 };
@@ -4186,6 +3573,6 @@ const pruneSubNodesDict = (node: any, dels: { [k: string]: boolean }) => {
   return node;
 };
 
-const pruneChildren = (node: any): any => {
+export const pruneChildren = (node: any) => {
   return pruneSubNodesDict(node, { children: true });
 };

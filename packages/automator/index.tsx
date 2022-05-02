@@ -1,6 +1,7 @@
 require("global-jsdom/register");
 import {
   compileTrio,
+  Debugger,
   evalEnergy,
   getListOfStagedStates,
   prepareState,
@@ -230,6 +231,7 @@ const singleProcess = async (
     fs.writeFileSync(join(out, "style.sty"), styIn);
     fs.writeFileSync(join(out, "domain.dsl"), dslIn);
     fs.writeFileSync(join(out, "meta.json"), JSON.stringify(metadata));
+    /*
     if(states) {
       fs.writeFileSync(join(out, "states.json"),JSON.stringify({
         initial: {shapes: initialState.shapes, sourceMap: initialState.shapeSourceMap.getRefs()},
@@ -237,9 +239,19 @@ const singleProcess = async (
         optimized: {shapes: optimizedState.shapes, sourceMap: optimizedState.shapeSourceMap.getRefs()},
       }));
     }
+    */
     console.log(
       chalk.green(`The diagram and metadata has been saved to ${out}`)
     );
+
+    //--------------------- Begin Debugger ---------------------//
+    const dbg = Debugger.getInstance();
+    //console.log(`Debug: ${dbg.toString()}`);
+    console.log(`queryDidStyleBlockApply(6,'x','A') = ${dbg.queryDidStyleBlockApply(6, 'x', 'A')}`);
+    console.log(`queryDidStyleBlockApply(21,'x','A') = ${dbg.queryDidStyleBlockApply(21, 'x', 'A')}`);
+
+    //---------------------  End  Debugger ---------------------//
+
     // returning metadata for aggregation
     return { metadata, state: optimizedState };
   } else {

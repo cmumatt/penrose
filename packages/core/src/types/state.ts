@@ -28,7 +28,6 @@ export interface IState {
   shapeOrdering: string[];
   labelCache: LabelCache;
   shapes: Shape[];
-  shapeSourceMap: ShapeSourceMap; // Map shapes to original source code
   varyingMap: VaryMap;
   canvas: Canvas;
 }
@@ -185,6 +184,8 @@ export interface IWeightInfo {
   epWeight: number;
 }
 
+// --------------- Begin Style Debugger ---------------
+
 // Mapping from shape to corresponding source type locations
 // TODO: Move this to its own type file? !!!
 export enum SourceProgramType {
@@ -236,52 +237,52 @@ export interface ISourceRef {
   colEnd: number;
   srcText?: string[]; // Source text of the entity
 }
-
 /**
  * A source map is a mapping from source code locations to source entities.
  */
 export class ShapeSourceMap {
-  private rep = {};
-  private dom = "";
-  private sub = "";
-  private sty = "";
-  constructor(dom: string, sub: string, sty: string) {
-    this.dom = dom;
-    this.sub = sub;
-    this.sty = sty;
+  private srcRep = {};
+  private domSrc = "";
+  private subSrc = "";
+  private stySrc = "";
+  private styRep = [];  // !!! 
+  constructor(domSrc: string, subSrc: string, stySrc: string) {
+    this.domSrc = domSrc;
+    this.subSrc = subSrc;
+    this.stySrc = stySrc;
   }
   public add(ref: ISourceRef): void {
-    if (!(ref.entity.type in this.rep)) {
-      this.rep[ref.entity.type] = {};
+    if (!(ref.entity.type in this.srcRep)) {
+      this.srcRep[ref.entity.type] = {};
     }
-    if (!(ref.entity.name in this.rep[ref.entity.type])) {
-      this.rep[ref.entity.type][ref.entity.name] = [];
+    if (!(ref.entity.name in this.srcRep[ref.entity.type])) {
+      this.srcRep[ref.entity.type][ref.entity.name] = [];
     }
-    this.rep[ref.entity.type][ref.entity.name].push({ ...ref }); // store a copy
+    this.srcRep[ref.entity.type][ref.entity.name].push({ ...ref }); // store a copy
     console.log(`Added to source map: ${JSON.stringify(ref)}`); // !!!
   }
   public getRefs(): ISourceRef[] {
     const returnList: ISourceRef[] = [];
-    for (const type in this.rep) {
-      for (const name in this.rep[type]) {
-        returnList.push({ ...this.rep[type][name] }); // return a copy
+    for (const type in this.srcRep) {
+      for (const name in this.srcRep[type]) {
+        returnList.push({ ...this.srcRep[type][name] }); // return a copy
       }
     }
     return returnList;
   }
   public getRefsByEntity(entity: ISourceMapEntity): ISourceRef[] {
     const returnList: ISourceRef[] = [];
-    if (entity.type in this.rep && entity.name in this.rep[entity.type]) {
-      returnList.push({ ...this.rep[entity.type][entity.name] }); // return a copy
+    if (entity.type in this.srcRep && entity.name in this.srcRep[entity.type]) {
+      returnList.push({ ...this.srcRep[entity.type][entity.name] }); // return a copy
     }
     return returnList;
   }
   public getSource(pgmType: SourceProgramType, start?: {line: number, col: number}, end?: {line: number, col:number }): string[] {
     let source = "";
     switch(pgmType) {
-      case SourceProgramType.DOMAIN: source = this.dom; break;
-      case SourceProgramType.SUBSTANCE: source = this.sub; break;
-      case SourceProgramType.STYLE: source = this.sty; break;
+      case SourceProgramType.DOMAIN: source = this.domSrc; break;
+      case SourceProgramType.SUBSTANCE: source = this.subSrc; break;
+      case SourceProgramType.STYLE: source = this.stySrc; break;
     }
     if(start && end) {
       start.line = start.line - 1;
