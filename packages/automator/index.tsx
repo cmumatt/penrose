@@ -10,17 +10,17 @@ import {
   showError,
   stepUntilConvergence,
 } from "@penrose/core";
+import chalk from "chalk";
+import convertHrtime from "convert-hrtime";
 import { randomBytes } from "crypto";
+import * as fs from "fs";
+import neodoc from "neodoc";
 import { dirname, join, parse, resolve } from "path";
+import * as prettier from "prettier";
+import uniqid from "uniqid";
 import { renderArtifacts } from "./artifacts";
 import { State } from "@penrose/core";
 import { DebugStyleBlockRel } from "@penrose/core/build/dist/compiler/Debugger";
-
-const fs = require("fs");
-const chalk = require("chalk");
-const neodoc = require("neodoc");
-const uniqid = require("uniqid");
-const convertHrtime = require("convert-hrtime");
 
 const USAGE = `
 Penrose Automator.
@@ -97,13 +97,11 @@ const singleProcess = async (
     variation,
   });
   const compileEnd = process.hrtime(compileStart);
-  let compiledState : State;
-  if (compilerOutput.isOk()) {
-    compiledState = compilerOutput.value;
-  } else {
+  if (compilerOutput.isErr()) {
     const err = compilerOutput.error;
     throw new Error(`Compilation failed:\n${showError(err)}`);
   }
+  const compiledState = compilerOutput.value;
 
   const labelStart = process.hrtime();
   // resample because initial sampling did not use the special sampling seed
@@ -127,7 +125,7 @@ const singleProcess = async (
 
   // make a list of canvas data if staged (prepare to generate multiple SVGs)
   let listOfCanvasData, canvas;
-  const resolvePath = (filePath: string) => {
+  const resolvePath = async (filePath: string) => {
     const parentDir = parse(join(prefix, sty)).dir;
     const joined = resolve(parentDir, filePath);
     return fs.readFileSync(joined, "utf8").toString();
@@ -225,22 +223,16 @@ const singleProcess = async (
       listOfCanvasData.map(writeFileOut);
     } else {
       // not staged --> just need one diagram
-      fs.writeFileSync(join(out, "output.svg"), canvas);
+      fs.writeFileSync(
+        join(out, "output.svg"),
+        prettier.format(canvas, { parser: "html" })
+      );
     }
 
     fs.writeFileSync(join(out, "substance.sub"), subIn);
     fs.writeFileSync(join(out, "style.sty"), styIn);
     fs.writeFileSync(join(out, "domain.dsl"), dslIn);
-    fs.writeFileSync(join(out, "meta.json"), JSON.stringify(metadata));
-    /*
-    if(states) {
-      fs.writeFileSync(join(out, "states.json"),JSON.stringify({
-        initial: {shapes: initialState.shapes, sourceMap: initialState.shapeSourceMap.getRefs()},
-        compiled: {shapes: compiledState.shapes, sourceMap: compiledState.shapeSourceMap.getRefs()},
-        optimized: {shapes: optimizedState.shapes, sourceMap: optimizedState.shapeSourceMap.getRefs()},
-      }));
-    }
-    */
+    fs.writeFileSync(join(out, "meta.json"), JSON.stringify(metadata, null, 2));
     console.log(
       chalk.green(`The diagram and metadata has been saved to ${out}`)
     );
@@ -355,7 +347,7 @@ const batchProcess = async (
         styURI,
         dslURI,
         folders,
-        join(out, `${name}-${id}${folders ? "" : ".svg"}`),
+        join(out, `${name}${folders ? "" : ".svg"}`),
         prefix,
         staged,
         {
@@ -390,7 +382,7 @@ const batchProcess = async (
   if (folders) {
     fs.writeFileSync(
       join(out, "aggregateData.json"),
-      JSON.stringify(finalMetadata)
+      JSON.stringify(finalMetadata, null, 2)
     );
     console.log(`The Aggregate metadata has been saved to ${out}.`);
   }
