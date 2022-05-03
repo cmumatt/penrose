@@ -66,7 +66,8 @@ export type RelationPatterns<T> = ASTNode<T> & {
   contents: RelationPattern<T>[];
 };
 
-// A relation pattern in two forms:
+// A relation pattern in three parts:
+//  1. The variable substitution
 //  1. An original relation pattern with its original Style variables
 //  2. A substituted relation pattern with its substituted Substance variables
 export type RelationPatternSubst<T> = {

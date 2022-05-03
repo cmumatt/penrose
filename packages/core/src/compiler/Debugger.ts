@@ -1,25 +1,16 @@
-import { A, ASTNode } from "types/ast";
+import { A } from "types/ast";
 import { DomainProg } from "types/domain";
-import {
-  ISourceMapEntity,
-  ISourceRef,
-  ShapeSourceMap,
-  SourceEntityType,
-  SourceProgramType,
-} from "types/state";
 import { RelationPatternSubst, Selector, StyProg } from "types/style";
+import { Subst } from "types/styleSemantics";
 import { SubProg } from "types/substance";
-import { pruneSubNodes } from "./Style";
 
 /**
  * !!! Document
- * !!! Add checks for state transitions
  */
 export class Debugger<T> {
   private state = 0; // 0=listening, 1=answering
   private static theInstance: Debugger<A>;
   private rep: DebugStyleBlock<T>[] = [];
-  private srcMap?: ShapeSourceMap;
   private domSrc = "";
   private subSrc = "";
   private stySrc = "";
@@ -29,10 +20,21 @@ export class Debugger<T> {
 
   // ------------------------- Singleton Impl. -----------------------------//
 
+  /**
+   * Replaces the singleton debugger with a new instance, i.e., for when
+   * a new program is being compiled/debugged.
+   * 
+   * @returns A new instance of the debugger
+   */
   public static newInstance(): Debugger<A> {
     this.theInstance = new Debugger();
     return this.theInstance;
   }
+  /**
+   * Returns the current instance of the debugger.
+   * 
+   * @returns The current instance of the debugger
+   */
   public static getInstance(): Debugger<A> {
     if (this.theInstance == undefined) {
       return Debugger.newInstance();
@@ -64,18 +66,15 @@ export class Debugger<T> {
   }
   public setDomAst(domAst: DomainProg<T>): void {
     this.moveToListeningState();
-    this.domAst = domAst;
+    this.domAst = JSON.parse(JSON.stringify(domAst)); // Protect the rep
   }
   public setSubAst(subAst: SubProg<T>): void {
     this.moveToListeningState();
-    this.subAst = subAst;
+    this.subAst = JSON.parse(JSON.stringify(subAst)); // Protect the rep
   }
   public setStyAst(styAst: StyProg<T>): void {
     this.moveToListeningState();
-    this.styAst = styAst;
-  }
-  public toString():string {
-    return JSON.stringify(pruneSubNodes(this, ["children", "where"]));
+    this.styAst = JSON.parse(JSON.stringify(styAst)); // Protect the rep
   }
 
   // ----------------------------- Queries ---------------------------------//
@@ -83,67 +82,108 @@ export class Debugger<T> {
   /**
    * This query returns true if the style block at styLine with style variable
    * styVar bound to substance object subObj satisfied the style block's requirements.
-   * 
-   * Note: Exceptions are thrown if no style block is present at styLine or the style
-   * block does not have style variable styVar.
-   * 
-   * @param styLine 
-   * @param styVar 
-   * @param subObj 
-   * @returns 
+   *
+   * Exception thrown if no style block is present at styLine.
+   *
+   * @param styLine The line number of the style block
+   * @param relVars Mapping of Style variables to Substance objects for the style block
+   * @returns True if the style block applied to the substance object, false otherwise
    */
-  public queryDidStyleBlockApply( styLine: number, styVar: string, subObj: string ): boolean {
+  public queryDidStyleBlockApply(styLine: number, relVars: Subst): boolean {
     // Ensure we are in a suitable state to answer questions
     this.moveToAnsweringState();
 
-    let blockFound = false; // We found the style block at styLine
-    let unsatFound = false; // We found subObj does not satisfy parts of the style block
-    let satFound = false; // We found subObj satisfies parts of the style block
-
-    // Loop over each style block to find the one specified on input
-    this.rep.forEach((block) => {
-      // Find the block specified by the line number; ignore the rest
-      if(block.sel["start"].line <= styLine && block.sel["end"].line >= styLine) {
-        blockFound = true;
-        unsatFound = unsatFound && block.unsats.some((rel) => this.hasMatchingSubstitution(rel,block,styVar,subObj));
-        satFound = satFound && block.sats.some((rel) => this.hasMatchingSubstitution(rel,block,styVar,subObj));
-      }
-    });
+    // Get the style block for this line number
+    const theBlock = this.getBlockAtLineNumber(styLine);
 
     // If we did not find the style block specified, throw an exception
-    if(!blockFound) {
-      throw new Error(`Style block at line ${styLine} not found`);
-    }
-
-    // We already tested to verify the variables match.  If there are no
-    // unsats present, then the block is satisfied and was applied.
-    return satFound && !unsatFound;
-  }
-
-  // !!! Doc
-  public queryExplainStyleBlockApplication( styLine: number, styVar: string, subObj: string ): DebugStyleBlockRel<T>[] {
-    // Ensure we are in a suitable state to answer questions
-    this.moveToAnsweringState();
-    let theBlock: DebugStyleBlock<T> | undefined;
-
-    // Loop over each style block to find the one specified on input
-    this.rep.forEach((block) => {
-      // Find the block specified by the line number; ignore the rest
-      if(block.sel["start"].line <= styLine && block.sel["end"].line >= styLine) {
-        theBlock = block;
-      }
-    });
-    
-    // If we did not find the style block specified, throw an exception
-    if(theBlock === undefined) {
+    if (theBlock === undefined) {
       throw new Error(`Style block at line ${styLine} not found`);
     } else {
-      // Return the matching sats/unsat conditions.  Protect the rep.
-      if(this.queryDidStyleBlockApply(styLine,styVar,subObj)) {
-        return JSON.parse(JSON.stringify(theBlock.sats.filter((rel) => this.hasMatchingSubstitution(rel,theBlock as DebugStyleBlock<unknown>,styVar,subObj))));
-      } else {
-        return JSON.parse(JSON.stringify(theBlock.unsats.filter((rel) => this.hasMatchingSubstitution(rel,theBlock as DebugStyleBlock<unknown>,styVar,subObj))));
+      // Check the list of successful substitutions captured during Style compilation.
+      let allVarsMatch;
+      for (const i in theBlock.substs) {
+        const blockVars = theBlock.substs[i];
+        allVarsMatch = true;
+        for (const j in relVars) {
+          if (j in blockVars && blockVars[j] == relVars[j]) {
+            // Do nothing
+          } else {
+            allVarsMatch = false;
+            break;
+          }
+        }
+        if (allVarsMatch) {
+          return true;
+        }
       }
+      return false; // Default case = no match
+    }
+  }
+
+  /**
+   * Returns true if the style block at styLine has a where clause
+   * 
+   * Exception thrown if no style block is present at styLine.
+   * 
+   * @param styLine The line number of the style block
+   * @returns True if the style block has a where clause, false otherwise
+   */
+  public queryDoesStyleBlockHaveWhereClause(styLine: number): boolean {
+    // Ensure we are in a suitable state to answer questions
+    this.moveToAnsweringState();
+
+    // Get the style block for this line number
+    const theBlock = this.getBlockAtLineNumber(styLine);
+
+    // If we did not find the style block specified, throw an exception
+    if (theBlock === undefined) {
+      throw new Error(`Style block at line ${styLine} not found`);
+    } else {
+      return theBlock.hasWhereClause;
+    }
+  }
+
+  /**
+   * Returns the set of reasons why a style block where clause was or was not satisfied.
+   * If the block lacks a where clause, an empty set of reasons is returned.
+   * 
+   * Exception thrown if no style block is present at styLine.
+   * 
+   * @param styLine The line number of the style block
+   * @param relVars Mapping of Style variables to Substance objects for the style block
+   * @returns A list of reasons why the where clause was satisfied or not satisfied
+   */
+  public queryExplainStyleBlockApplication(
+    styLine: number,
+    relVars: Subst
+  ): DebugStyleBlockRel<T>[] {
+    // Ensure we are in a suitable state to answer questions
+    this.moveToAnsweringState();
+
+    // Get the style block for this line number
+    const theBlock = this.getBlockAtLineNumber(styLine);
+
+    // If we did not find the style block specified, throw an exception
+    if (theBlock === undefined) {
+      throw new Error(`Style block at line ${styLine} not found`);
+    } else {
+      // If there is no where clause, return an empty array
+      if(!theBlock.hasWhereClause) return [];
+
+      // Return the matching sats/unsat conditions.  Protect the rep.
+      const conds = (this.queryDidStyleBlockApply(styLine, relVars) ? theBlock.sats : theBlock.unsats);
+      return JSON.parse(
+        JSON.stringify(
+          conds.filter((rel) =>
+            this.hasMatchingSubstitution(
+              rel,
+              theBlock as DebugStyleBlock<unknown>,
+              relVars
+            )
+          )
+        )
+      );
     }
   }
 
@@ -155,19 +195,15 @@ export class Debugger<T> {
   private moveToAnsweringState(): void {
     if (this.state >= 1) {
       return; // No state change required
-    } else  {
+    } else {
       if (this.domAst === undefined)
-        throw new Error(
-          "Unable to accept debug queries: no Domain AST loaded"
-        );
+        throw new Error("Unable to accept debug queries: no Domain AST loaded");
       if (this.subAst === undefined)
         throw new Error(
           "Unable to accept debug queries: no Substance AST loaded"
         );
       if (this.styAst === undefined)
-        throw new Error(
-          "Unable to accept debug queries: no Style AST loaded"
-        );
+        throw new Error("Unable to accept debug queries: no Style AST loaded");
       if (this.domSrc == "")
         throw new Error(
           "Unable to accept debug queries: no Domain Source File loaded"
@@ -185,8 +221,9 @@ export class Debugger<T> {
       //  - Set the state to answering state
       //  - Generate the source map
       //  - Add source text to reasons
-      // (!!! May consider lazy-evaluating this)
+      // (Might want to consider lazy-evaluating this)
       this.state = 1; // Answering
+      /*
       this.srcMap = mapShapesToSource(
         this.domAst,
         this.domSrc,
@@ -195,6 +232,7 @@ export class Debugger<T> {
         this.styAst,
         this.stySrc
       );
+      */
       this.addSourceToReasons();
     }
   }
@@ -203,14 +241,13 @@ export class Debugger<T> {
 
   private addSourceToReasons() {
     this.moveToAnsweringState();
-    console.log("Resolving source lines for unsats..."); //!!!
     this.rep.forEach((block) => {
       // Resolve source refs to source text
       block.unsats.concat(block.sats).forEach((unsat) => {
         unsat.reasons.forEach((reason) => {
           reason.srcRef.forEach((srcRef) => {
-            srcRef.srcText = (this.srcMap as ShapeSourceMap).getSource(
-              srcRef.origin,
+            srcRef.srcText = this.getSource(
+              this.stySrc,
               { line: srcRef.lineStart, col: srcRef.colStart },
               { line: srcRef.lineEnd, col: srcRef.colEnd }
             );
@@ -218,30 +255,119 @@ export class Debugger<T> {
         });
       });
     });
-    console.log("Done Resolving source lines for unsats..."); //!!!
   }
 
-  // Helper function to check if the block substitution applies to the query
-  private hasMatchingSubstitution = ( rel: DebugStyleBlockRel<unknown>, block:DebugStyleBlock<unknown>, styVar: string, subObj: string  ): boolean => {
-    // Style variable is present in the block substitution
-    if(styVar in rel["subst"]) {
-      // Style variable is bound to the substance object
-      return (rel["subst"][styVar] == subObj);
-    } else {
-      throw new Error(`Style variable '${styVar}' not found in Style block at lines ${block.sel["start"].line}-${block.sel["end"].line}`);
+  /**
+   * Internal helper function to check if a given block substitution applies to the query.
+   * 
+   * @param rel The relation we are checking to see if it matches the query
+   * @param block The block where the relation is defined that matches the query
+   * @param relVars The mapping of style and substance variables we are looking for in the relation
+   * @returns true if the relation matches the query, otherwise false
+   */
+  private hasMatchingSubstitution = (
+    rel: DebugStyleBlockRel<unknown>,
+    block: DebugStyleBlock<unknown>,
+    relVars: Subst
+  ): boolean => {
+    // Throw an exception if provided an empty query
+    if (relVars == {}) {
+      throw new Error(`Debug query has no Style variable substitution`);
     }
-  }  
 
+    // Loop over the substitution pairs in the query
+    for (const k in relVars) {
+      // If the queried style variable exists in the block...
+      if (k in rel.rel.subst) {
+        // ... and the bound Substance variables do not match, return false
+        if (relVars[k] !== rel.rel.subst[k]) {
+          return false;
+        }
+      } else {
+        // ... otherwise throw an exception if the style variable does not exist
+        throw new Error(
+          `Style variable '${relVars[k]}' not found in Style block at lines ${block.sel["start"].line}-${block.sel["end"].line}`
+        );
+      }
+    }
 
+    // If we found no mismatches, return true
+    return true;
+  };
+
+  /**
+   * Finds the style block that matches the given line number
+   * 
+   * @param line The line number of the style block
+   * @returns The style block at that line number, otherwise undefined
+   */
+  private getBlockAtLineNumber(
+    styLine: number
+  ): DebugStyleBlock<T> | undefined {
+    // Loop over each style block to find the one specified on input
+    for (const i in this.rep) {
+      const block = this.rep[i];
+      // Find the block specified by the line number; ignore the rest
+      if (
+        block.sel["start"].line <= styLine &&
+        block.sel["end"].line >= styLine
+      ) {
+        return block;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Returns source text for the given start and end positions
+   * @param pgmSrc Program source
+   * @param start Start line and column {line: number, col: number}
+   * @param end End line and column {line: number, col: number}
+   * @returns Source text
+   */
+  private getSource(pgmSrc: string, start?: {line: number, col: number}, end?: {line: number, col:number }): string[] {
+    if(start && end) {
+      start.line = start.line - 1;
+      end.line = end.line - 1;
+      end.col = end.col + 1;
+    }
+
+    const lines = pgmSrc.split(/\r?\n/);
+    const outLines: string[] = [];
+    const startLine = start ? start.line : 0;
+    const endLine = end ? end.line : lines.length-1;
+
+    for(let i = startLine; i < endLine+1; i++) {
+      if(start && end) {
+        if(i >= start.line && i <= end.line) {
+          if(start.line == end.line) {
+            if(start.col <= end.col) {
+              outLines.push(lines[i].substring(start.col,end.col));
+            } else {
+              outLines.push(lines[i].substring(start.col));
+            }
+          } else if (i == start.line) {
+            outLines.push(lines[i].substring(start.col));
+          } else if (i == end.line) {
+            outLines.push(lines[i].substring(0,end.col));
+          } else {
+            outLines.push(lines[i]);
+          }
+        }
+      } else {
+        outLines.push(lines[i]);
+      }
+    }
+    return outLines;
+  }
 }
 
-//type StyleDebugInfo<T> = {
-//  blocks: StyleDebugInfoBlock<T>[];
-//};
 export type DebugStyleBlock<T> = {
-  sel: Selector<unknown>;
-  sats: DebugStyleBlockRel<T>[];
-  unsats: DebugStyleBlockRel<T>[];
+  sel: Selector<unknown>; // Selection Block
+  substs: Subst[]; // List of substitutions tried
+  hasWhereClause: boolean; // true = Where clause present, false otherwise
+  sats: DebugStyleBlockRel<T>[]; // List of satisfied relations (if not a match-all block)
+  unsats: DebugStyleBlockRel<T>[]; // List of unsatisfied relations (if not a match-all block)
 };
 export type DebugStyleBlockRel<T> = {
   rel: RelationPatternSubst<T>;
@@ -249,532 +375,23 @@ export type DebugStyleBlockRel<T> = {
 };
 export type DebugReason = {
   code: DebugReasonCodes;
-  srcRef: ISourceRef[];
+  srcRef: DebugSourceRef[];
   srcTxt?: string[];
 };
+export type DebugSourceRef = {
+  origin: DebugProgramType; // e.g. DOMAIN, SUBSTANCE, STYLE
+  lineStart: number;
+  lineEnd: number;
+  colStart: number;
+  colEnd: number;
+  srcText?: string[]; // Source text of the entity
+}
+export enum DebugProgramType {
+  DOMAIN = "DOM",
+  SUBSTANCE = "SUB",
+  STYLE = "STY",
+}
 export enum DebugReasonCodes {
   MATCHING_SUB_STATEMENTS_FOUND = "MATCHING_SUB_STATEMENTS_FOUND",
   NO_MATCHING_SUB_STATEMENTS = "NO_MATCHING_SUB_STATEMENTS",
 }
-
-// Mapping rule Registry
-enum NameMapRules {
-  SKIP,
-  OP,
-  VALUE,
-  CONTENTS,
-  CONTENTS_VALUE,
-  TYPE_VALUE,
-  TYPE_NAME_VALUE,
-  NAME_VALUE,
-  NAME_CONTENTS_VALUE,
-  HEADER_CONTENTS_CONTENTS_VALUE,
-  VARIABLE_VALUE,
-  PROPERTY_PATH,
-  FIELD_PATH,
-  TAG,
-}
-
-// Structure for declaring rules that map AST nodes to Source Mappings
-type AstSourceMap = {
-  [k: string]: { map: NameMapRules; type?: SourceEntityType; subs: string[][] };
-};
-
-/**
- *
- * @param node  The AST Node to name
- * @param rule  Rule to apply to the node to extract its name
- * @returns
- */
-const mapEntityName = (node: ASTNode<unknown>, rule: NameMapRules): string => {
-  switch (rule) {
-    case NameMapRules.SKIP:
-      return "";
-    case NameMapRules.OP:
-      return node["op"];
-    case NameMapRules.TAG:
-      return node["tag"];
-    case NameMapRules.VALUE:
-      return node["value"];
-    case NameMapRules.CONTENTS:
-      return node["contents"];
-    case NameMapRules.CONTENTS_VALUE:
-      return node["contents"]["value"];
-    case NameMapRules.TYPE_VALUE:
-      return node["type"]["value"];
-    case NameMapRules.TYPE_NAME_VALUE:
-      return node["type"]["name"]["value"];
-    case NameMapRules.NAME_VALUE:
-      return node["name"]["value"];
-    case NameMapRules.NAME_CONTENTS_VALUE:
-      return node["name"]["contents"]["value"];
-    case NameMapRules.HEADER_CONTENTS_CONTENTS_VALUE:
-      return node["contents"]["contents"]["value"];
-    case NameMapRules.VARIABLE_VALUE:
-      return node["variable"]["value"];
-    case NameMapRules.PROPERTY_PATH:
-      return (
-        node["name"]["contents"]["value"] +
-        "." +
-        node["field"]["value"] +
-        "." +
-        node["property"]["value"]
-      );
-    case NameMapRules.FIELD_PATH:
-      return node["name"]["contents"]["value"] + "." + node["field"]["value"];
-    default:
-      throw new Error(`Unhandled mapEntityName type: ${rule}`);
-  }
-};
-
-/**
- * Map shapes to their original source code
- *
- * TODO: The style piece should probably be here, but not the other parts.  !!!
- *
- * @param domProg
- * @param domSrc
- * @param subProg
- * @param subSrc
- * @param styProg
- * @param stySrc
- * @returns ShapeSourceMap
- */
-export const mapShapesToSource = (
-  domProg: DomainProg<unknown>,
-  domSrc: string,
-  subProg: SubProg<unknown>,
-  subSrc: string,
-  styProg: StyProg<unknown>,
-  stySrc: string
-): ShapeSourceMap => {
-  // Create the source map
-  const sourceMap: ShapeSourceMap = new ShapeSourceMap(domSrc, subSrc, stySrc);
-
-  // ------------------------------------------------------------------------
-  // Style: resolve GPIs to rules and Substance objects
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to Style AST data for outputting Source Map
-  const styAstMap: AstSourceMap = {
-    StyProg: {
-      map: NameMapRules.SKIP,
-      subs: [["blocks"]],
-    },
-    HeaderBlock: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["header"], ["block", "statements"]],
-    },
-    PathAssign: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["path"], ["value"]],
-    },
-    Selector: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["head"], ["where"]],
-    },
-    DeclPatterns: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    DeclPattern: {
-      map: NameMapRules.TYPE_VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [["id"]],
-    },
-    StyVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.STYVAR,
-      subs: [],
-    },
-    LocalVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.STYLOCAL,
-      subs: [],
-    },
-    RelationPatterns: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    RelPred: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMPREDICATE, // !!! Always a predicate?
-      subs: [["args"]],
-    },
-    SEBind: {
-      map: NameMapRules.SKIP,
-      subs: [["contents"]],
-    },
-    Fix: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYNUMLIT,
-      subs: [],
-    },
-    StringLit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYSTRLIT,
-      subs: [],
-    },
-    InternalLocalVar: {
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    ObjFn: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    ConstrFn: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    FieldPath: {
-      map: NameMapRules.FIELD_PATH,
-      type: SourceEntityType.STYLANG,
-      subs: [],
-    },
-    GPIDecl: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["shapeName"], ["properties"]],
-    },
-    Namespace: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Layering: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["above"], ["below"]],
-    },
-    BinOp: {
-      map: NameMapRules.OP,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["left"], ["right"]],
-    },
-    PropertyDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYPROPERTY,
-      subs: [["value"]],
-    },
-    PropertyPath: {
-      map: NameMapRules.PROPERTY_PATH,
-      type: SourceEntityType.STYPROPERTY,
-      subs: [],
-    },
-    Vector: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    CompApp: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["args"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.STYVAR,
-      subs: [],
-    },
-    AccessPath: {
-      // Not Yet Implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    BoolLit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYBOOLIT,
-      subs: [],
-    },
-    Override: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["path"], ["value"]],
-    },
-    SubVar: {
-      map: NameMapRules.CONTENTS_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    Delete: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Tuple: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    List: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["contents"]],
-    },
-    Vary: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYNUMVAR,
-      subs: [],
-    },
-    VaryInit: {
-      map: NameMapRules.CONTENTS,
-      type: SourceEntityType.STYNUMVAR,
-      subs: [],
-    },
-    UOp: {
-      map: NameMapRules.OP,
-      type: SourceEntityType.STYFUNCTION,
-      subs: [["arg"]],
-    },
-    RelBind: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.STYLANG,
-      subs: [["id"], ["expr"]],
-    },
-    SEFuncOrValCons: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.STYVAR, // Not sure this is right
-      subs: [["args"]],
-    },
-  };
-  mapAstNodesToSource(styProg, styAstMap, SourceProgramType.STYLE, sourceMap);
-
-  // ------------------------------------------------------------------------
-  // Substance: resolve Substance objects to types and predicates
-  //            TODO: Should probably be done in Substance compiler !!!
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to AST data for outputting Source Map
-  const subAstMap: AstSourceMap = {
-    SubProg: {
-      map: NameMapRules.SKIP,
-      subs: [["statements"]],
-    },
-    Decl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    ApplyPredicate: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBPREDICATE,
-      subs: [["args"]],
-    },
-    Func: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBFUNCTION,
-      subs: [["args"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [],
-    },
-    AutoLabel: {
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    LabelDecl: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.SUBLABEL,
-      subs: [["variable"]],
-    },
-    Bind: {
-      map: NameMapRules.VARIABLE_VALUE,
-      type: SourceEntityType.SUBOBJECT,
-      subs: [["expr"]],
-    },
-    ApplyConstructor: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBCONSTRUCTOR,
-      subs: [["args"]],
-    },
-    ApplyFunction: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.SUBFUNCTION,
-      subs: [["args"]],
-    },
-  };
-  mapAstNodesToSource(
-    subProg,
-    subAstMap,
-    SourceProgramType.SUBSTANCE,
-    sourceMap
-  );
-
-  // ------------------------------------------------------------------------
-  // Domain: Resolve predicates, functions, etc. to source locations
-  //         TODO: Should probably be done in Domain compiler !!!
-  // ------------------------------------------------------------------------
-  // Application of mapping rules to AST data for outputting Source Map
-  const domAstMap: AstSourceMap = {
-    DomainProg: {
-      map: NameMapRules.SKIP,
-      subs: [["statements"]],
-    },
-    TypeDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [["params"], ["supertypes"]],
-    },
-    FunctionDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMFUNCTION,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    ConstructorDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMCONSTRUCTOR,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    PredicateDecl: {
-      map: NameMapRules.NAME_VALUE,
-      type: SourceEntityType.DOMPREDICATE,
-      subs: [["params"], ["args"], ["output"]],
-    },
-    Arg: {
-      map: NameMapRules.SKIP,
-      subs: [["variable"], ["type"]],
-    },
-    TypeConstructor: {
-      map: NameMapRules.SKIP,
-      subs: [["name"], ["args"]],
-    },
-    TypeVar: {
-      map: NameMapRules.SKIP,
-      subs: [["name"]],
-    },
-    Identifier: {
-      map: NameMapRules.VALUE,
-      type: SourceEntityType.DOMTYPE,
-      subs: [],
-    },
-    Prop: {
-      map: NameMapRules.TAG,
-      type: SourceEntityType.DOMPROP,
-      subs: [],
-    },
-    SubTypeDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    PreludeDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-    NotationDecl: {
-      // Not yet implemented
-      map: NameMapRules.SKIP,
-      subs: [],
-    },
-  };
-  mapAstNodesToSource(domProg, domAstMap, SourceProgramType.DOMAIN, sourceMap);
-
-  return sourceMap;
-};
-
-/**
- * Map shapes to their original source code
- *
- * TODO: The style piece should probably be here, but not the other parts.  !!!
- *
- * @param ast AST to map to source statements
- * @param map Map of AST nodes to their original source code
- * @param pgmType Source Program Type (Style, Substance, Domain)
- * @param sourceMap
- * @returns ShapeSourceMap
- */
-const mapAstNodesToSource = (
-  ast: ASTNode<unknown>,
-  map: AstSourceMap,
-  pgmType: SourceProgramType,
-  sourceMap: ShapeSourceMap
-): ShapeSourceMap => {
-  // Initially fill the stack with the list of AST block nodes
-  const nodeStack: ASTNode<unknown>[] = [ast];
-  while (nodeStack.length > 0) {
-    // Pop item off the stack
-    const node = nodeStack.pop() as ASTNode<unknown>;
-    //console.log(`Processing AST node: ${node.tag}`);
-
-    // Add any subnodes in this node to the stack for subsequent processing
-    if (node.tag in map && "subs" in map[node.tag]) {
-      map[node.tag].subs.forEach((sub: string[]) => {
-        let nodesToAdd;
-        switch (sub.length) {
-          case 1:
-            nodesToAdd = node[sub[0]];
-            break;
-          case 2:
-            nodesToAdd = node[sub[0]][sub[1]];
-            break;
-          case 3:
-            nodesToAdd = node[sub[0]][sub[1]][sub[2]];
-            break;
-          case 4:
-            nodesToAdd = node[sub[0]][sub[1]][sub[2]][sub[3]];
-            break;
-          default:
-            throw new Error(`Invalid sub node length: ${sub.length}`);
-        }
-        if (nodesToAdd !== undefined) {
-          Array.isArray(nodesToAdd)
-            ? nodeStack.push(...nodesToAdd.reverse())
-            : nodeStack.push(nodesToAdd);
-        }
-      });
-
-      // Map the node into the source map -- if needed
-      const name: string = mapEntityName(node, map[node.tag].map);
-      if (name !== "") {
-        sourceMap.add(
-          mapTemplate(pgmType, node, {
-            type: map[node.tag].type,
-            name: name,
-          } as ISourceMapEntity)
-        );
-      }
-    } else {
-      console.log(` - Skipping unknown node: ${node.tag}`); // !!!
-    }
-  }
-
-  return sourceMap;
-};
-
-/**
- * Helper function to generate a source map refernece from an AST Node
- *
- * @param origin Source Program Type (e.g., Style, Substance, Domain)
- * @param node AST Node to Process
- * @param entity Entity name and type
- * @returns ISourceRef
- */
-export const mapTemplate = (
-  origin: SourceProgramType,
-  node: ASTNode<unknown>,
-  entity: ISourceMapEntity
-): ISourceRef => {
-  if (!("start" in node)) {
-    node["start"] = { line: 0, col: 0 };
-  }
-  if (!("end" in node)) {
-    node["end"] = { line: 0, col: 0 };
-  }
-  return {
-    entity: entity,
-    origin: origin,
-    lineStart: node["start"].line,
-    lineEnd: node["end"].line,
-    colStart: node["start"].col,
-    colEnd: node["end"].col,
-  };
-};

@@ -48,8 +48,6 @@ import {
   Fn,
   OptType,
   Params,
-  SourceEntityType,
-  SourceProgramType,
   State,
 } from "types/state";
 import {
@@ -123,13 +121,13 @@ import {
   variationSeeds,
   zip2,
 } from "utils/Util";
-import { checkTypeConstructor, isDeclaredSubtype } from "./Domain";
 import {
-  mapTemplate,
   Debugger,
+  DebugProgramType,
   DebugReasonCodes,
   DebugStyleBlock,
 } from "./Debugger";
+import { checkTypeConstructor, isDeclaredSubtype } from "./Domain";
 
 const log = consola
   .create({ level: LogLevel.Info })
@@ -1370,7 +1368,6 @@ const relMatchesProg = (
   rel: RelationPatternSubst<A>,
   dbgStyBlock: DebugStyleBlock<A>
 ): boolean => {
-  console.log(`     - relMatchesProg: ${JSON.stringify(pruneChildren(rel))}`); // !!!
   if (rel.subRel.tag === "RelField") {
     // the current pattern matches on a Style field
     const subName = rel.subRel.name.contents.value;
@@ -1388,11 +1385,10 @@ const relMatchesProg = (
   } else {
     const result = subProg.statements.some((line) => {
       const result = relMatchesLine(typeEnv, subEnv, line, rel.subRel);
-      //if(result) console.log(`     - relMatchLn: ${result} : ${JSON.stringify(removeChildren(line))}`); // !!!
       return result;
     });
 
-    // Record the match result so the debugger may query it later
+    // Record the match result for the debugger
     (result ? dbgStyBlock.sats : dbgStyBlock.unsats).push({
       rel: rel,
       reasons: [
@@ -1401,10 +1397,13 @@ const relMatchesProg = (
             ? DebugReasonCodes.MATCHING_SUB_STATEMENTS_FOUND
             : DebugReasonCodes.NO_MATCHING_SUB_STATEMENTS,
           srcRef: [
-            mapTemplate(SourceProgramType.STYLE, rel.preRel, {
-              type: SourceEntityType.STYLANG,
-              name: "",
-            }),
+            {
+              origin: DebugProgramType.STYLE,
+              lineStart: rel.preRel["start"].line,
+              lineEnd: rel.preRel["end"].line,
+              colStart: rel.preRel["start"].col,
+              colEnd: rel.preRel["end"].col,
+            }
           ],
         },
       ],
@@ -1444,7 +1443,6 @@ const allRelsMatch = (
   rels: RelationPatternSubst<A>[],
   dbgStyBlock: DebugStyleBlock<A>
 ): boolean => {
-  //console.log('     --------------------------------'); // !!!
   return rels.every((rel) =>
     relMatchesProg(typeEnv, subEnv, subProg, rel, dbgStyBlock)
   );
@@ -1468,7 +1466,6 @@ const filterRels = (
   };
 
   return substs.filter((subst) => {
-    console.log(`   - Testing: ${JSON.stringify(subst)}`); // !!!
     return allRelsMatch(
       typeEnv,
       subEnv,
@@ -1619,23 +1616,16 @@ const findSubstsSel = (
         fullSubst(selEnv, subst)
       );
 
-      // !!!
+      // Track which substitutions matched the selection block for debugging
       const dbgStyBlock: DebugStyleBlock<A> = {
         sel: sel,
+        hasWhereClause: !(rels.length == 0),
+        substs: [],
         sats: [],
         unsats: [],
       };
-      console.log(
-        `Block is: ${JSON.stringify(
-          pruneChildren({ head: header, where: header.where })
-        )}`
-      ); // !!!
-      console.log(
-        ` - rawSubsts:       ${JSON.stringify(pruneChildren(rawSubsts))}`
-      ); // !!!
-      console.log(
-        ` - substCandidates: ${JSON.stringify(pruneChildren(substCandidates))}`
-      ); // !!!
+
+      // Eliminate substitutions that don't satisfy the where clause
       const filteredSubsts = filterRels(
         varEnv,
         subEnv,
@@ -1644,14 +1634,12 @@ const findSubstsSel = (
         substCandidates,
         dbgStyBlock
       );
-      Debugger.getInstance().addBlock(dbgStyBlock);
       const correctSubsts = filteredSubsts.filter(uniqueKeysAndVals);
-      console.log(
-        ` - filteredSubsts:  ${JSON.stringify(pruneChildren(filteredSubsts))}`
-      ); // !!!
-      console.log(
-        ` - correctSubsts:   ${JSON.stringify(pruneChildren(correctSubsts))}`
-      ); // !!!
+
+      // Update the debugger
+      dbgStyBlock.substs = correctSubsts;
+      Debugger.getInstance().addBlock(dbgStyBlock);
+
       return correctSubsts;
     }
     case "Namespace": {
@@ -3130,9 +3118,7 @@ const genState = (
 
   const uninitializedPaths = findUninitialized(trans);
   const shapePathList: [string, string][] = findShapeNames(trans);
-  console.log(`Shapes: ${JSON.stringify(pruneChildren(shapePathList))}`); // !!!
   const shapePaths = shapePathList.map(mkPath);
-  console.log(`ShapePaths: ${JSON.stringify(pruneChildren(shapePaths))}`); // !!!
 
   const canvasErrs = checkCanvas(trans);
   if (canvasErrs.length > 0) {
@@ -3493,11 +3479,8 @@ export const compileStyle = (
     return err(toStyleErrors(selErrs));
   }
 
-  log.info("selEnvs", JSON.stringify(pruneChildren(selEnvs)));
-
   // Translate style program
   const styVals: number[] = []; // COMBAK: Deal with style values when we have plugins
-  console.log("Translating style program...."); //!!!
   const translateRes = translateStyProg(
     varEnv,
     subEnv,
@@ -3506,8 +3489,6 @@ export const compileStyle = (
     labelMap,
     styVals
   );
-  console.log("Done Translating style program...."); //!!!
-  console.log(`Translation: ${JSON.stringify(pruneChildren(translateRes))}`); //!!!")
 
   log.info("translation (before genOptProblem)", translateRes);
 
@@ -3525,9 +3506,7 @@ export const compileStyle = (
   }
 
   // TODO(errors): `findExprsSafe` shouldn't fail (as used in `genOptProblemAndState`, since all the paths are generated from the translation) but could always be safer...
-  console.log("Calling genState..."); //!!!
   const initState: Result<State, StyleErrors> = genState(variation, trans);
-  console.log("Done Calling genState..."); //!!!
   log.info("init state from GenOptProblem", initState);
 
   if (initState.isErr()) {
@@ -3535,44 +3514,4 @@ export const compileStyle = (
   }
 
   return ok(initState.value);
-};
-
-// !!! These should not be here
-/**
- * Removes subnodes from a tree based on key name.
- *
- * @param node Tree from which to remove keys
- * @param dels Array of string/key values to prune
- * @returns Tree w/desired keys pruned
- */
-export const pruneSubNodes = (node: any, dels: string[]):any => {
-  const dict = Object.assign({}, ...dels.map((key) => ({ [key]: true })));
-  return pruneSubNodesDict(node, dict);
-};
-const pruneSubNodesDict = (node: any, dels: { [k: string]: boolean }) => {
-  // Array - process each element and return it
-  if (Array.isArray(node)) {
-    const newNode: unknown[] = [];
-    node.forEach((subNode) => newNode.push(pruneSubNodesDict(subNode, dels)));
-    return newNode;
-  }
-
-  // Object - except dels, process each element and return it
-  if (node instanceof Object) {
-    const newNode = {};
-    let k: keyof typeof node;
-    for (k in node) {
-      if (!(k.valueOf() in dels)) {
-        newNode[k] = pruneSubNodesDict(node[k], dels);
-      }
-    }
-    return newNode;
-  }
-
-  // Base case - return value unchanged
-  return node;
-};
-
-export const pruneChildren = (node: any) => {
-  return pruneSubNodesDict(node, { children: true });
 };

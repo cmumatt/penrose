@@ -14,6 +14,7 @@ import { randomBytes } from "crypto";
 import { dirname, join, parse, resolve } from "path";
 import { renderArtifacts } from "./artifacts";
 import { State } from "@penrose/core";
+import { DebugStyleBlockRel } from "@penrose/core/build/dist/compiler/Debugger";
 
 const fs = require("fs");
 const chalk = require("chalk");
@@ -247,8 +248,34 @@ const singleProcess = async (
     //--------------------- Begin Debugger ---------------------//
     const dbg = Debugger.getInstance();
     //console.log(`Debug: ${dbg.toString()}`);
-    console.log(`queryDidStyleBlockApply(6,'x','A') = ${dbg.queryDidStyleBlockApply(6, 'x', 'A')}`);
-    console.log(`queryDidStyleBlockApply(21,'x','A') = ${dbg.queryDidStyleBlockApply(21, 'x', 'A')}`);
+    console.log(`queryDidStyleBlockApply(6,{'x':'A'}) = ${dbg.queryDidStyleBlockApply(6, {'x': 'A'})}`);
+    console.log('^ Should be true');
+    console.log(`queryDidStyleBlockApply(21,{'x':'A'}) = ${dbg.queryDidStyleBlockApply(21, {'x': 'A'})}`);
+    console.log('^ Should be false');
+    console.log(`queryDidStyleBlockApply(21,{'y':'A'}) = ${dbg.queryDidStyleBlockApply(21, {'y': 'A'})}`);
+    console.log('^ Should be true');
+    console.log(`queryDidStyleBlockApply(21,{'x':'B','y':'A'}) = ${dbg.queryDidStyleBlockApply(21, {'x': 'B', 'y': 'A'})}`);
+    console.log('^ Should be true');
+    console.log(`queryDidStyleBlockApply(21,{'x':'B','y':'C'}) = ${dbg.queryDidStyleBlockApply(21, {'x': 'B', 'y': 'C'})}`);
+    console.log('^ Should be false');
+    console.log(`queryDoesStyleBlockHaveWhereClause(6) = ${dbg.queryDoesStyleBlockHaveWhereClause(6)}`);
+    console.log('^ Should be false');
+    console.log(`queryDoesStyleBlockHaveWhereClause(21) = ${dbg.queryDoesStyleBlockHaveWhereClause(21)}`);
+    console.log('^ Should be true');
+    let result = dbg.queryExplainStyleBlockApplication(21, {'x': 'B', 'y': 'A'})
+    result.forEach((rel) => {
+      rel.rel.preRel = undefined;
+      rel.rel.subRel = undefined;
+    });
+    console.log(`queryExplainStyleBlockApplication(21,{'x':'B','y':'A'}) = ${JSON.stringify(result)}`);
+    result = dbg.queryExplainStyleBlockApplication(21, {'x': 'B', 'y': 'C'})
+    result.forEach((rel) => {
+      rel.rel.preRel = undefined;
+      rel.rel.subRel = undefined;
+    });
+    console.log(`queryExplainStyleBlockApplication(21,{'x':'B','y':'C'}) = ${JSON.stringify(result)}`);
+
+
 
     //---------------------  End  Debugger ---------------------//
 
